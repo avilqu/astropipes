@@ -1,11 +1,11 @@
-from PyQt6.QtWidgets import QMenu
+from PyQt6.QtWidgets import QMenu, QMessageBox
 from PyQt6.QtGui import QAction, QFont
 from colorama import Fore, Style
 from lib.gui.common.console_window import ConsoleOutputWindow
 from .platesolving_thread import PlatesolvingThread
 from .calibration_thread import CalibrationThread
 
-def build_single_file_menu(parent=None, show_header_callback=None, show_image_callback=None, solve_image_callback=None, calibrate_and_compare_callback=None):
+def build_single_file_menu(parent=None, show_header_callback=None, show_image_callback=None, solve_image_callback=None, calibrate_and_compare_callback=None, delete_file_callback=None):
     menu = QMenu(parent)
     show_image_action = QAction("Show in FITS viewer", menu)
     font = show_image_action.font()
@@ -35,6 +35,17 @@ def build_single_file_menu(parent=None, show_header_callback=None, show_image_ca
     if show_header_callback:
         show_header_action.triggered.connect(show_header_callback)
     menu.addAction(show_header_action)
+    
+    # Add separator before delete action
+    menu.addSeparator()
+    
+    # Add delete action with warning styling
+    delete_action = QAction("Delete file", menu)
+    delete_action.setIconText("🗑️")  # Add trash icon
+    if delete_file_callback:
+        delete_action.triggered.connect(delete_file_callback)
+    menu.addAction(delete_action)
+    
     return menu
 
 def build_calibration_single_file_menu(parent=None, show_header_callback=None, show_image_callback=None, solve_image_callback=None):
@@ -56,7 +67,7 @@ def build_calibration_single_file_menu(parent=None, show_header_callback=None, s
     menu.addAction(show_header_action)
     return menu
 
-def build_multi_file_menu(parent=None, load_in_viewer_callback=None, platesolve_all_callback=None):
+def build_multi_file_menu(parent=None, load_in_viewer_callback=None, platesolve_all_callback=None, delete_files_callback=None):
     menu = QMenu(parent)
     if load_in_viewer_callback:
         load_action = QAction("Load files in FITS viewer", menu)
@@ -69,7 +80,19 @@ def build_multi_file_menu(parent=None, load_in_viewer_callback=None, platesolve_
         platesolve_action = QAction("Platesolve all images", menu)
         platesolve_action.triggered.connect(platesolve_all_callback)
         menu.addAction(platesolve_action)
-    if not load_in_viewer_callback and not platesolve_all_callback:
+    
+    # Add separator before delete action if we have other actions
+    if (load_in_viewer_callback or platesolve_all_callback) and delete_files_callback:
+        menu.addSeparator()
+    
+    # Add delete action for multiple files
+    if delete_files_callback:
+        delete_action = QAction("Delete selected files", menu)
+        delete_action.setIconText("🗑️")  # Add trash icon
+        delete_action.triggered.connect(delete_files_callback)
+        menu.addAction(delete_action)
+    
+    if not load_in_viewer_callback and not platesolve_all_callback and not delete_files_callback:
         menu.addAction("No actions available (multiple files)")
     return menu
 
@@ -213,3 +236,97 @@ def calibrate_and_compare_file(parent, fits_file, show_image_callback=None, show
     # Start calibration
     console_window.append_text(f"Starting calibration for: {fits_file.path}\n")
     thread.start() 
+
+def delete_files_with_confirmation(parent, fits_files, on_deletion_complete=None):
+    """
+    Delete FITS files with confirmation dialog.
+    
+    Args:
+        parent: Parent widget for dialog parenting
+        fits_files: List of FITS file objects to delete
+        on_deletion_complete: Optional callback to call when deletion is complete
+    """
+    if not fits_files:
+        return
+    
+    # Prepare confirmation message
+    if len(fits_files) == 1:
+        file_info = fits_files[0]
+        import os
+        filename = os.path.basename(file_info.path)
+        target = file_info.target or "Unknown target"
+        msg = f"Are you sure you want to delete this file?\n\n"
+        msg += f"File: {filename}\n"
+        msg += f"Target: {target}\n"
+        msg += f"Path: {file_info.path}\n\n"
+        msg += "This action will:\n"
+        msg += "• Remove the file from the database\n"
+        msg += "• Delete the physical file from disk\n\n"
+        msg += "This action cannot be undone!"
+    else:
+        msg = f"Are you sure you want to delete {len(fits_files)} files?\n\n"
+        msg += "This action will:\n"
+        msg += "• Remove all files from the database\n"
+        msg += "• Delete all physical files from disk\n\n"
+        msg += "This action cannot be undone!"
+    
+    # Show confirmation dialog
+    reply = QMessageBox.question(
+        parent, 
+        "Confirm File Deletion", 
+        msg,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No  # Default to No for safety
+    )
+    
+    if reply != QMessageBox.StandardButton.Yes:
+        return
+    
+    # Proceed with deletion
+    deleted_count = 0
+    errors = []
+    
+    try:
+        from .db_access import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        for fits_file in fits_files:
+            try:
+                # Safety check: ensure it's a FITS file
+                if not fits_file.path.lower().endswith(('.fits', '.fit')):
+                    errors.append(f"Not a FITS file: {fits_file.path}")
+                    continue
+                
+                # Delete from database first
+                success = db_manager.delete_fits_file(fits_file.id)
+                if success:
+                    # Now delete physical file
+                    import os
+                    if os.path.exists(fits_file.path):
+                        os.remove(fits_file.path)
+                        deleted_count += 1
+                    else:
+                        # File doesn't exist on disk, but was removed from DB
+                        deleted_count += 1
+                        errors.append(f"File not found on disk: {fits_file.path}")
+                else:
+                    errors.append(f"Failed to delete from database: {fits_file.path}")
+            except Exception as e:
+                errors.append(f"Error deleting {fits_file.path}: {str(e)}")
+        
+        # Show results
+        if errors:
+            error_msg = f"Deletion completed with {len(errors)} errors:\n\n"
+            error_msg += "\n".join(errors[:5])  # Show first 5 errors
+            if len(errors) > 5:
+                error_msg += f"\n... and {len(errors) - 5} more errors"
+            QMessageBox.warning(parent, "Deletion Completed with Errors", error_msg)
+        else:
+            QMessageBox.information(parent, "Deletion Complete", f"Successfully deleted {deleted_count} file(s).")
+        
+        # Call completion callback if provided
+        if on_deletion_complete:
+            on_deletion_complete()
+            
+    except Exception as e:
+        QMessageBox.critical(parent, "Deletion Error", f"An error occurred during deletion: {str(e)}") 

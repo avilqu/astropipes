@@ -447,7 +447,9 @@ class AstroLibraryGUI(QMainWindow):
         # Table connections
         self.table_widget.selection_changed.connect(self.on_table_selection_changed)
         self.table_widget.platesolving_completed.connect(self.load_database)
+        self.table_widget.database_refresh_requested.connect(self.load_database)
         self.main_table_widget.platesolving_completed.connect(self.load_database)
+        self.main_table_widget.database_refresh_requested.connect(self.load_database)
         # Menu selection
         self.left_panel.menu_selection_changed.connect(self.on_menu_selection_changed)
         self.left_panel.target_renamed.connect(lambda old, new: self.load_database())

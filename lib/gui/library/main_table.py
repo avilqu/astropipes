@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal
 from PyQt6.QtGui import QColor
-from .context_dropdown import build_single_file_menu, build_multi_file_menu, build_empty_menu, calibrate_and_compare_file
+from .context_dropdown import build_single_file_menu, build_multi_file_menu, build_empty_menu, calibrate_and_compare_file, delete_files_with_confirmation
 from lib.gui.common.header_window import HeaderViewer
 from lib.gui.common.console_window import ConsoleOutputWindow
 from lib.fits.header import get_fits_header_as_json
@@ -62,6 +62,7 @@ class MainFitsTableWidget(QTableWidget):
     """Table widget for displaying FITS files in a flat, sortable table."""
     selection_changed = pyqtSignal(list)  # Emits list of selected fits_file_ids
     platesolving_completed = pyqtSignal()
+    database_refresh_requested = pyqtSignal()  # New signal for database refresh
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -390,7 +391,10 @@ class MainFitsTableWidget(QTableWidget):
                 
                 calibrate_and_compare_file(self, fits_file, show_image_callback=show_file_in_viewer, show_both_callback=show_both_files_in_viewer)
             
-            menu = build_single_file_menu(self, show_header_callback=show_header, show_image_callback=show_image, solve_image_callback=solve_image, calibrate_and_compare_callback=calibrate_and_compare)
+            def delete_file():
+                delete_files_with_confirmation(self, selected_files, on_deletion_complete=self.database_refresh_requested.emit)
+            
+            menu = build_single_file_menu(self, show_header_callback=show_header, show_image_callback=show_image, solve_image_callback=solve_image, calibrate_and_compare_callback=calibrate_and_compare, delete_file_callback=delete_file)
         elif len(selected_files) > 1:
             from .context_dropdown import platesolve_multiple_files
             def load_in_viewer():
@@ -400,7 +404,9 @@ class MainFitsTableWidget(QTableWidget):
                 launch_viewer(fits_paths)
             def platesolve_all():
                 platesolve_multiple_files(self, selected_files, on_all_finished=lambda results: self.platesolving_completed.emit())
-            menu = build_multi_file_menu(self, load_in_viewer_callback=load_in_viewer, platesolve_all_callback=platesolve_all)
+            def delete_files():
+                delete_files_with_confirmation(self, selected_files, on_deletion_complete=self.database_refresh_requested.emit)
+            menu = build_multi_file_menu(self, load_in_viewer_callback=load_in_viewer, platesolve_all_callback=platesolve_all, delete_files_callback=delete_files)
         else:
             menu = build_empty_menu(self)
         menu.exec(self.viewport().mapToGlobal(pos))
