@@ -5,10 +5,10 @@ Name=Astropipes Library
 Name[en]=Astropipes Library
 Comment=Astronomical Image Library Management Tool
 Comment[en]=Astronomical Image Library Management Tool
-Exec=PYTHONPATH=/home/tan/dev/astro-pipelines /home/tan/dev/astro-pipelines/.venv/bin/python /home/tan/dev/astro-pipelines/astropipes -G
-Icon=/home/tan/dev/astro-pipelines/lib/legacy/icon.png
+Exec=PYTHONPATH=/home/tan/dev/astropipes /home/tan/dev/astropipes/.venv/bin/python /home/tan/dev/astropipes/astropipes -G
+Icon=/home/tan/dev/astropipes/lib/legacy/icon.png
 Terminal=false
 Categories=Science;Astronomy;Education;
 Keywords=astronomy;fits;image;library;management;
 StartupNotify=true 
-Path=/home/tan/dev/astro-pipelines
+Path=/home/tan/dev/astropipes

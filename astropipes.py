@@ -1,4 +1,4 @@
-#!/home/tan/dev/astro-pipelines/.venv/bin/python
+#!/home/tan/dev/astropipes/.venv/bin/python
 
 """ Main entry for astropipes.
     @author: A. Vilquin Barrajon <avilqu@gmail.com>

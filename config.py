@@ -26,7 +26,7 @@ OBS_LON = 170.483
 OBS_LAT = -43.906701849273134
 
 # Database configuration
-DATABASE_PATH = '/home/tan/dev/astro-pipelines/astropipes.db'  # SQLite database file path (absolute path)
+DATABASE_PATH = '/home/tan/dev/astropipes/astropipes.db'  # SQLite database file path (absolute path)
 
 # Astrometry.net API key
 ASTROMETRY_KEY = 'zrvbykzuksfbcilr'

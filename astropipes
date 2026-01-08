@@ -9,11 +9,16 @@ import sys
 import subprocess
 
 def main():
-    # Get the directory where this script is located
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Get the directory where this script is located (resolve symlinks)
+    script_path = os.path.abspath(__file__)
+    script_real_path = os.path.realpath(script_path)
+    script_dir = os.path.dirname(script_real_path)
     
-    # If this script is in a system bin directory, we need to find the actual project directory
-    if script_dir in ['/usr/local/bin', '/home/tan/bin', '/usr/bin', '/opt/homebrew/bin']:
+    # Check if we're in a system bin directory (the directory of the symlink, not the real file)
+    symlink_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # If this script is accessed via a symlink in a system bin directory, find the actual project directory
+    if symlink_dir in ['/usr/local/bin', '/home/tan/bin', '/usr/bin', '/opt/homebrew/bin']:
         # First check for environment variable
         astropipes_home = os.environ.get('ASTROPIPES_HOME')
         if astropipes_home and os.path.exists(os.path.join(astropipes_home, 'astropipes.py')):
@@ -21,7 +26,8 @@ def main():
         else:
             # Look for the project in common locations
             possible_paths = [
-                '/home/tan/dev/astro-pipelines',  # User's development path
+                '/home/tan/dev/astropipes',       # Current project path
+                '/home/tan/dev/astro-pipelines',  # Legacy path (for backwards compatibility)
                 '/opt/astro-pipelines',           # System installation
                 '/usr/local/astro-pipelines',     # Alternative system installation
             ]
@@ -35,10 +41,10 @@ def main():
             if project_dir is None:
                 print("Error: Could not find astropipes.py in common installation directories")
                 print("Please ensure astropipes is properly installed or set ASTROPIPES_HOME environment variable")
-                print("Example: export ASTROPIPES_HOME=/path/to/astro-pipelines")
+                print("Example: export ASTROPIPES_HOME=/path/to/astropipes")
                 sys.exit(1)
     else:
-        # Running from project directory
+        # Running from project directory (either directly or via symlink that resolves to project dir)
         project_dir = script_dir
     
     # Path to the astropipes.py file
