@@ -218,6 +218,10 @@ if __name__ == "__main__":
             # Temporarily enable logging for platesolving
             logging.disable(logging.NOTSET)
             
+            # Use working directory for CLI output
+            output_dir = os.path.join(os.getcwd(), "solved")
+            os.makedirs(output_dir, exist_ok=True)
+            
             # Solve each file
             for i, fits_file in enumerate(valid_files, 1):
                 print(f"\n{Style.BRIGHT + Fore.CYAN}[{i}/{len(valid_files)}] Processing: {os.path.basename(fits_file)}{Style.RESET_ALL}")
@@ -226,7 +230,7 @@ if __name__ == "__main__":
                 result = solve_single_image(
                     fits_file_path=fits_file,
                     solve_field_path="solve-field",
-                    output_dir="/tmp/astropipes/solved",
+                    output_dir=output_dir,
                     timeout=300,
                     apply_solution=True
                 )
@@ -291,6 +295,10 @@ if __name__ == "__main__":
             # Initialize calibration manager
             calib_manager = CalibrationManager()
             
+            # Use working directory for CLI output
+            output_dir = os.path.join(os.getcwd(), "calibrated")
+            os.makedirs(output_dir, exist_ok=True)
+            
             # Track results
             successful_calibrations = 0
             failed_calibrations = 0
@@ -299,8 +307,8 @@ if __name__ == "__main__":
             for i, fits_file in enumerate(valid_files, 1):
                 print(f"\n{Style.BRIGHT + Fore.CYAN}[{i}/{len(valid_files)}] Processing: {os.path.basename(fits_file)}{Style.RESET_ALL}")
                 
-                # Calibrate the file
-                result = calib_manager.calibrate_file_simple(fits_file)
+                # Calibrate the file with custom output directory
+                result = calib_manager.calibrate_file_simple(fits_file, output_dir=output_dir)
                 
                 if 'error' in result:
                     print(f"{Style.BRIGHT + Fore.RED}Calibration failed: {result['error']}{Style.RESET_ALL}")
@@ -343,7 +351,6 @@ if __name__ == "__main__":
                                       check_astroalign_available, align_images_chunked)
             from astropy.io import fits
             import os
-            import tempfile
             import config
             
             fits_files = args.align
@@ -459,13 +466,10 @@ if __name__ == "__main__":
             else:
                 print("  Using precise WCS reprojection")
             
-            # Create output directory
-            output_dir = "/tmp/astropipes/aligned"
+            # Use working directory for CLI output
+            output_dir = os.path.join(os.getcwd(), "aligned")
             os.makedirs(output_dir, exist_ok=True)
-            
-            # Create unique subdirectory for this alignment session
-            temp_dir = tempfile.mkdtemp(dir=output_dir, prefix="")
-            print(f"\n{Style.BRIGHT + Fore.CYAN}Output directory: {temp_dir}{Style.RESET_ALL}")
+            print(f"\n{Style.BRIGHT + Fore.CYAN}Output directory: {output_dir}{Style.RESET_ALL}")
             
             # Progress callback for console output
             def progress_callback(progress):
@@ -516,7 +520,7 @@ if __name__ == "__main__":
                     original_filename = os.path.basename(original_path)
                     name, ext = os.path.splitext(original_filename)
                     aligned_filename = f"aligned_{name}{ext}"
-                    aligned_path = os.path.join(temp_dir, aligned_filename)
+                    aligned_path = os.path.join(output_dir, aligned_filename)
                     
                     # Save aligned image
                     hdu = fits.PrimaryHDU(aligned_data, new_header)
@@ -547,7 +551,7 @@ if __name__ == "__main__":
             print(f"  Successful alignments: {Style.BRIGHT + Fore.GREEN}{successful_saves}{Style.RESET_ALL}")
             print(f"  Failed alignments: {Style.BRIGHT + Fore.RED}{len(valid_files) - successful_saves}{Style.RESET_ALL}")
             print(f"  Method used: {method}")
-            print(f"  Output directory: {temp_dir}")
+            print(f"  Output directory: {output_dir}")
             
             if successful_saves == len(valid_files):
                 print(f"\n{Style.BRIGHT + Fore.GREEN}All images aligned successfully!{Style.RESET_ALL}")
@@ -570,7 +574,6 @@ if __name__ == "__main__":
             from lib.fits.align import get_memory_usage
             from astropy.io import fits
             import os
-            import tempfile
             import config
             
             fits_files = args.integrate
@@ -608,13 +611,10 @@ if __name__ == "__main__":
                     print("Integration cancelled.")
                     return
             
-            # Create output directory
-            output_dir = "/tmp/astropipes/integrated"
+            # Use working directory for CLI output
+            output_dir = os.path.join(os.getcwd(), "integrated")
             os.makedirs(output_dir, exist_ok=True)
-            
-            # Create unique subdirectory for this integration session
-            temp_dir = tempfile.mkdtemp(dir=output_dir, prefix="")
-            print(f"\n{Style.BRIGHT + Fore.CYAN}Output directory: {temp_dir}{Style.RESET_ALL}")
+            print(f"\n{Style.BRIGHT + Fore.CYAN}Output directory: {output_dir}{Style.RESET_ALL}")
             
             # Progress callback for console output
             def progress_callback(progress):
@@ -642,18 +642,34 @@ if __name__ == "__main__":
             # Save integrated image
             print(f"\n{Style.BRIGHT + Fore.CYAN}Saving integrated image...{Style.RESET_ALL}")
             
-            # Generate output filename based on input files
-            if len(valid_files) <= 5:
-                # For small numbers of files, include their names in the output filename
-                base_names = [os.path.splitext(os.path.basename(f))[0] for f in valid_files[:3]]
-                if len(valid_files) > 3:
-                    base_names.append(f"+{len(valid_files)-3}_more")
-                output_filename = f"integrated_{'_'.join(base_names)}.fits"
-            else:
-                # For many files, use a generic name
-                output_filename = f"integrated_{len(valid_files)}_images.fits"
+            # Extract filter information from the first file
+            filter_name = None
+            try:
+                with fits.open(valid_files[0]) as hdul:
+                    filter_name = hdul[0].header.get('FILTER', None)
+                    if filter_name:
+                        # Clean up filter name - remove spaces, keep only alphanumeric and common characters
+                        filter_name = str(filter_name).strip()
+            except Exception as e:
+                print(f"{Style.BRIGHT + Fore.YELLOW}Warning: Could not read filter from header: {e}{Style.RESET_ALL}")
             
-            new_file_path = os.path.join(temp_dir, output_filename)
+            # Generate output filename with filter information
+            if filter_name:
+                # Use filter in filename: integration_L.fits or master_L.fits
+                output_filename = f"integration_{filter_name}.fits"
+            else:
+                # Fallback if no filter found
+                if len(valid_files) <= 5:
+                    # For small numbers of files, include their names in the output filename
+                    base_names = [os.path.splitext(os.path.basename(f))[0] for f in valid_files[:3]]
+                    if len(valid_files) > 3:
+                        base_names.append(f"+{len(valid_files)-3}_more")
+                    output_filename = f"integrated_{'_'.join(base_names)}.fits"
+                else:
+                    # For many files, use a generic name
+                    output_filename = f"integrated_{len(valid_files)}_images.fits"
+            
+            new_file_path = os.path.join(output_dir, output_filename)
             
             try:
                 # Save the integrated result
@@ -669,7 +685,9 @@ if __name__ == "__main__":
             print(f"  Total files processed: {len(valid_files)}")
             print(f"  Method used: Standard Stacking ({args.integration_method})")
             print(f"  Sigma clipping: {'Enabled' if args.sigma_clip else 'Disabled'}")
-            print(f"  Output directory: {temp_dir}")
+            if filter_name:
+                print(f"  Filter: {filter_name}")
+            print(f"  Output directory: {output_dir}")
             print(f"  Output file: {output_filename}")
             
             if os.path.exists(new_file_path):

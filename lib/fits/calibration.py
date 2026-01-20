@@ -304,14 +304,20 @@ class CalibrationManager:
         """
         return CCDData.read(image_path, unit='adu')
     
-    def _create_temp_dir(self) -> Path:
+    def _create_temp_dir(self, output_dir: Optional[str] = None) -> Path:
         """
         Create and return a temporary directory for calibration files.
+        
+        Args:
+            output_dir: Optional custom output directory. If None, uses default /tmp location.
         
         Returns:
             Path to the temporary directory
         """
-        temp_dir = Path("/tmp/astropipes/calibrated")
+        if output_dir:
+            temp_dir = Path(output_dir)
+        else:
+            temp_dir = Path("/tmp/astropipes/calibrated")
         temp_dir.mkdir(parents=True, exist_ok=True)
         return temp_dir
     
@@ -515,7 +521,7 @@ class CalibrationManager:
             print(f"{Style.BRIGHT + Fore.RED}Error reading FITS file {file_path}: {e}{Style.RESET_ALL}")
             return None
 
-    def calibrate_file(self, file_path: str, steps: Dict[str, bool] = None) -> Dict[str, Any]:
+    def calibrate_file(self, file_path: str, steps: Dict[str, bool] = None, output_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         Calibrate a FITS file using the found calibration masters.
         
@@ -523,6 +529,7 @@ class CalibrationManager:
             file_path: Path to the FITS file to calibrate
             steps: Dictionary specifying which calibration steps to apply
                    {'bias': True, 'dark': True, 'flat': True}
+            output_dir: Optional custom output directory. If None, uses default /tmp location.
             
         Returns:
             Dictionary containing calibration results
@@ -567,7 +574,7 @@ class CalibrationManager:
         print(f"\n{Style.BRIGHT}Calibrating {os.path.basename(file_path)} using: {', '.join(available_masters)}...{Style.RESET_ALL}")
         
         # Create temporary directory
-        temp_dir = self._create_temp_dir()
+        temp_dir = self._create_temp_dir(output_dir)
         
         try:
             # Start with the original image
@@ -620,17 +627,18 @@ class CalibrationManager:
             print(f"{Style.BRIGHT + Fore.RED}Error during calibration: {e}{Style.RESET_ALL}")
             return {'error': str(e)}
     
-    def calibrate_file_simple(self, file_path: str) -> Dict[str, Any]:
+    def calibrate_file_simple(self, file_path: str, output_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         Simple calibration interface that finds masters and calibrates in one step.
         
         Args:
             file_path: Path to the FITS file to calibrate
+            output_dir: Optional custom output directory. If None, uses default /tmp location.
             
         Returns:
             Dictionary containing calibration results
         """
-        return self.calibrate_file(file_path)
+        return self.calibrate_file(file_path, output_dir=output_dir)
     
     def add_origfile_header_manually(self, calibrated_path: str, original_path: str) -> bool:
         """
