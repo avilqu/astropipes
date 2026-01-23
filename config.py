@@ -20,6 +20,7 @@ def to_display_time(dt_utc):
 CALIBRATION_PATH = '/home/tan/Astro/calibration'
 DATA_PATH = '/home/tan/Astro/obs'
 ARCHIVE_PATH = '/home/tan/Astro/data'
+PROCESSED_PATH = '/home/tan/Astro/_astropipes'
 
 OBS_CODE = 'R56'
 OBS_LON = 170.483

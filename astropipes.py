@@ -187,6 +187,7 @@ if __name__ == "__main__":
             from lib.sci.platesolving import solve_single_image
             import os
             import logging
+            import config
             
             fits_files = args.solve
             
@@ -218,8 +219,8 @@ if __name__ == "__main__":
             # Temporarily enable logging for platesolving
             logging.disable(logging.NOTSET)
             
-            # Use working directory for CLI output
-            output_dir = os.path.join(os.getcwd(), "solved")
+            # Use PROCESSED_PATH from config for CLI output
+            output_dir = os.path.join(config.PROCESSED_PATH, "solved")
             os.makedirs(output_dir, exist_ok=True)
             
             # Solve each file
@@ -268,6 +269,7 @@ if __name__ == "__main__":
         try:
             from lib.fits.calibration import CalibrationManager
             import os
+            import config
             
             fits_files = args.calibrate
             
@@ -295,8 +297,8 @@ if __name__ == "__main__":
             # Initialize calibration manager
             calib_manager = CalibrationManager()
             
-            # Use working directory for CLI output
-            output_dir = os.path.join(os.getcwd(), "calibrated")
+            # Use PROCESSED_PATH from config for CLI output
+            output_dir = os.path.join(config.PROCESSED_PATH, "calibrated")
             os.makedirs(output_dir, exist_ok=True)
             
             # Track results
@@ -466,8 +468,8 @@ if __name__ == "__main__":
             else:
                 print("  Using precise WCS reprojection")
             
-            # Use working directory for CLI output
-            output_dir = os.path.join(os.getcwd(), "aligned")
+            # Use PROCESSED_PATH from config for CLI output
+            output_dir = os.path.join(config.PROCESSED_PATH, "aligned")
             os.makedirs(output_dir, exist_ok=True)
             print(f"\n{Style.BRIGHT + Fore.CYAN}Output directory: {output_dir}{Style.RESET_ALL}")
             
@@ -611,8 +613,8 @@ if __name__ == "__main__":
                     print("Integration cancelled.")
                     return
             
-            # Use working directory for CLI output
-            output_dir = os.path.join(os.getcwd(), "integrated")
+            # Use PROCESSED_PATH from config for CLI output
+            output_dir = os.path.join(config.PROCESSED_PATH, "integrated")
             os.makedirs(output_dir, exist_ok=True)
             print(f"\n{Style.BRIGHT + Fore.CYAN}Output directory: {output_dir}{Style.RESET_ALL}")
             
