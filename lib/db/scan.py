@@ -566,7 +566,15 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
         try:
             if db_info['table'] == 'FitsFile':
                 # Update FitsFile entry
-                fits_file = session.query(FitsFile).filter(FitsFile.id == db_info['id']).first()
+                file_id = db_info.get('id')
+                if file_id is None:
+                    session.close()
+                    return {
+                        'success': False,
+                        'message': f"FitsFile entry has no ID in database",
+                        'file_updated': False
+                    }
+                fits_file = session.query(FitsFile).filter(FitsFile.id == file_id).first()
                 if fits_file:
                     # Update all fields
                     fits_file.date_obs = date_obs
@@ -587,9 +595,10 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
                     
                     session.commit()
                     
+                    file_id = fits_file.id if fits_file.id is not None else 'Unknown'
                     return {
                         'success': True,
-                        'message': f"Successfully updated FitsFile entry (ID: {fits_file.id})",
+                        'message': f"Successfully updated FitsFile entry (ID: {file_id})",
                         'file_updated': True,
                         'table': 'FitsFile',
                         'id': fits_file.id,
@@ -606,15 +615,24 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
                     }
                 else:
                     session.rollback()
+                    db_id = db_info.get('id', 'Unknown')
                     return {
                         'success': False,
-                        'message': f"FitsFile entry not found in database (ID: {db_info['id']})",
+                        'message': f"FitsFile entry not found in database (ID: {db_id})",
                         'file_updated': False
                     }
                     
             elif db_info['table'] == 'CalibrationMaster':
                 # Update CalibrationMaster entry
-                calib_file = session.query(CalibrationMaster).filter(CalibrationMaster.id == db_info['id']).first()
+                file_id = db_info.get('id')
+                if file_id is None:
+                    session.close()
+                    return {
+                        'success': False,
+                        'message': f"CalibrationMaster entry has no ID in database",
+                        'file_updated': False
+                    }
+                calib_file = session.query(CalibrationMaster).filter(CalibrationMaster.id == file_id).first()
                 if calib_file:
                     # Update all fields
                     calib_file.date = date_obs.strftime('%Y-%m-%d') if date_obs else ''
@@ -630,9 +648,10 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
                     
                     session.commit()
                     
+                    calib_id = calib_file.id if calib_file.id is not None else 'Unknown'
                     return {
                         'success': True,
-                        'message': f"Successfully updated CalibrationMaster entry (ID: {calib_file.id})",
+                        'message': f"Successfully updated CalibrationMaster entry (ID: {calib_id})",
                         'file_updated': True,
                         'table': 'CalibrationMaster',
                         'id': calib_file.id,
@@ -645,9 +664,10 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
                     }
                 else:
                     session.rollback()
+                    db_id = db_info.get('id', 'Unknown')
                     return {
                         'success': False,
-                        'message': f"CalibrationMaster entry not found in database (ID: {db_info['id']})",
+                        'message': f"CalibrationMaster entry not found in database (ID: {db_id})",
                         'file_updated': False
                     }
             else:

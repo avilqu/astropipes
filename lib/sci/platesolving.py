@@ -180,11 +180,14 @@ class AstrometryEngine:
                     print(line, end='')
             
             # Wait for process to complete
-            return_code = process.poll()
+            # Use wait() instead of poll() to ensure we get a real return code
+            return_code = process.wait()
             solve_time = time.time() - start_time
             
             if return_code != 0:
-                raise subprocess.CalledProcessError(return_code, cmd)
+                # Ensure returncode is not None (wait() should always return a code, but be safe)
+                safe_return_code = return_code if return_code is not None else -1
+                raise subprocess.CalledProcessError(safe_return_code, cmd)
             
             # Check if .new file was created
             if os.path.exists(new_filename):
@@ -227,12 +230,31 @@ class AstrometryEngine:
                 success=False,
                 message=f"solve-field timed out after {self.timeout}s"
             )
-        except Exception as e:
-            logger.error(f"Error running solve-field: {e}")
+        except subprocess.CalledProcessError as e:
+            # Handle CalledProcessError specially to avoid formatting issues with None returncode
+            if e.returncode is not None:
+                error_msg = f"Command '{' '.join(cmd)}' returned non-zero exit status {e.returncode}"
+            else:
+                error_msg = f"Command '{' '.join(cmd)}' failed with unknown exit status"
+            logger.error(f"Error running solve-field: {error_msg}")
             self._cleanup_temp_files(Path(fits_file_path).stem)
             return PlatesolvingResult(
                 success=False,
-                message=f"Error running solve-field: {e}"
+                message=f"Error running solve-field: {error_msg}"
+            )
+        except Exception as e:
+            # Safely format exception message to avoid formatting errors
+            # (subprocess.CalledProcessError.__str__ uses % formatting which can fail if returncode is None)
+            try:
+                error_msg = str(e)
+            except Exception as format_error:
+                error_msg = f"Exception of type {type(e).__name__} (could not format: {type(format_error).__name__})"
+            
+            logger.error(f"Error running solve-field: {error_msg}")
+            self._cleanup_temp_files(Path(fits_file_path).stem)
+            return PlatesolvingResult(
+                success=False,
+                message=f"Error running solve-field: {error_msg}"
             )
     
     def _extract_solution_info(self, solution_file_path: str, original_file_path: str) -> Dict[str, Union[float, int]]:
@@ -315,7 +337,12 @@ class AstrometryEngine:
             }
             
         except Exception as e:
-            print(f"   Error extracting solution info: {e}")
+            # Safely format exception message to avoid formatting errors
+            try:
+                error_msg = str(e)
+            except Exception:
+                error_msg = f"Exception of type {type(e).__name__}"
+            print(f"   Error extracting solution info: {error_msg}")
             return {}
     
     def _cleanup_temp_files(self, base_name: str):
@@ -497,10 +524,11 @@ def solve_single_image(fits_file_path: str,
             if is_file_in_database(fits_file_path):
                 db_info = get_file_database_info(fits_file_path)
                 if db_info:
+                    db_id = db_info.get('id', 'Unknown')
                     if output_callback:
-                        output_callback(f"   File is present in database ({db_info['table']} table, ID: {db_info['id']})\n")
+                        output_callback(f"   File is present in database ({db_info['table']} table, ID: {db_id})\n")
                     else:
-                        print(f"   File is present in database ({db_info['table']} table, ID: {db_info['id']})")
+                        print(f"   File is present in database ({db_info['table']} table, ID: {db_id})")
                     
                     # Re-scan the file to update database with new WCS information
                     if output_callback:
@@ -572,11 +600,31 @@ def solve_single_image(fits_file_path: str,
         return solve_result
         
     except Exception as e:
+        # Safely format exception message to avoid formatting errors
+        import traceback
+        try:
+            error_msg = str(e)
+        except Exception as format_error:
+            # If even str(e) fails, use a safe fallback
+            error_msg = f"Exception of type {type(e).__name__} (could not format: {type(format_error).__name__})"
+        
+        # Get traceback for debugging
+        try:
+            tb_str = traceback.format_exc()
+            # Only show last few lines to avoid clutter
+            tb_lines = tb_str.strip().split('\n')
+            if len(tb_lines) > 10:
+                tb_str = '\n'.join(tb_lines[-10:])
+        except Exception:
+            tb_str = "Could not get traceback"
+        
         if output_callback:
-            output_callback(f"{Style.BRIGHT + Fore.RED}Error in platesolving pipeline: {e}{Style.RESET_ALL}\n")
+            output_callback(f"{Style.BRIGHT + Fore.RED}Error in platesolving pipeline: {error_msg}{Style.RESET_ALL}\n")
+            output_callback(f"{Style.BRIGHT + Fore.YELLOW}Traceback (last 10 lines):{Style.RESET_ALL}\n{tb_str}\n")
         else:
-            print(f"{Style.BRIGHT + Fore.RED}Error in platesolving pipeline: {e}{Style.RESET_ALL}")
+            print(f"{Style.BRIGHT + Fore.RED}Error in platesolving pipeline: {error_msg}{Style.RESET_ALL}")
+            print(f"{Style.BRIGHT + Fore.YELLOW}Traceback (last 10 lines):{Style.RESET_ALL}\n{tb_str}")
         return PlatesolvingResult(
             success=False,
-            message=f"Error in platesolving pipeline: {e}"
+            message=f"Error in platesolving pipeline: {error_msg}"
         ) 

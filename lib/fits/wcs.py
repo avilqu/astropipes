@@ -342,8 +342,13 @@ def extract_wcs_from_file(wcs_file_path: str) -> Dict[str, Union[str, float, int
         # Read the WCS file
         with fits.open(wcs_file_path) as wcs_hdu:
             wcs_header = wcs_hdu[0].header
-            
-        print(f"WCS file contains {len(wcs_header)} header cards")
+        
+        # Safely get header length
+        try:
+            header_len = len(wcs_header) if wcs_header is not None else 0
+            print(f"WCS file contains {header_len} header cards")
+        except Exception:
+            print(f"WCS file contains header cards (count unavailable)")
         
         # Extract WCS keywords
         wcs_keywords = [
@@ -360,30 +365,71 @@ def extract_wcs_from_file(wcs_file_path: str) -> Dict[str, Union[str, float, int
         
         extracted_wcs = {}
         for keyword in wcs_keywords:
-            if keyword in wcs_header:
-                extracted_wcs[keyword] = wcs_header[keyword]
-                # print(f"Extracted {keyword}: {wcs_header[keyword]}")  # Debug info removed
+            try:
+                if keyword in wcs_header:
+                    value = wcs_header[keyword]
+                    # Skip None values and handle various edge cases
+                    if value is not None:
+                        # Try to convert to appropriate type to avoid formatting issues
+                        try:
+                            # For numeric keywords, ensure they're numeric
+                            if keyword in ['CRPIX1', 'CRPIX2', 'CRVAL1', 'CRVAL2', 
+                                         'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
+                                         'PC1_1', 'PC1_2', 'PC2_1', 'PC2_2',
+                                         'CDELT1', 'CDELT2', 'CROTA1', 'CROTA2',
+                                         'LONPOLE', 'LATPOLE']:
+                                # Try to convert to float
+                                float(value)
+                            extracted_wcs[keyword] = value
+                        except (ValueError, TypeError):
+                            # Skip values that can't be converted
+                            print(f"   Warning: Skipping {keyword} with invalid value: {value}")
+            except Exception as e:
+                # Skip keywords that cause errors when accessing
+                print(f"   Warning: Error accessing {keyword}: {e}")
+                continue
         # --- SIP extraction ---
         for key in wcs_header:
-            if (
-                key.startswith("A_") or key.startswith("B_") or
-                key.startswith("AP_") or key.startswith("BP_") or
-                key.endswith("_ORDER")
-            ):
-                extracted_wcs[key] = wcs_header[key]
+            try:
+                if (
+                    key.startswith("A_") or key.startswith("B_") or
+                    key.startswith("AP_") or key.startswith("BP_") or
+                    key.endswith("_ORDER")
+                ):
+                    value = wcs_header[key]
+                    # Skip None values to avoid formatting errors later
+                    if value is not None:
+                        extracted_wcs[key] = value
+            except Exception as e:
+                # Skip keys that cause errors when accessing
+                print(f"   Warning: Error accessing SIP key {key}: {e}")
+                continue
         # --- END SIP extraction ---
         # Log summary of extracted WCS
         if extracted_wcs:
-            print(f"   Extracted {len(extracted_wcs)} WCS keywords")
-            if 'CRVAL1' in extracted_wcs and 'CRVAL2' in extracted_wcs:
-                print(f"   Reference coordinates: RA={extracted_wcs['CRVAL1']:.4f}°, Dec={extracted_wcs['CRVAL2']:.4f}°")
+            try:
+                print(f"   Extracted {len(extracted_wcs)} WCS keywords")
+                if 'CRVAL1' in extracted_wcs and 'CRVAL2' in extracted_wcs:
+                    try:
+                        crval1 = float(extracted_wcs['CRVAL1'])
+                        crval2 = float(extracted_wcs['CRVAL2'])
+                        print(f"   Reference coordinates: RA={crval1:.4f}°, Dec={crval2:.4f}°")
+                    except (ValueError, TypeError):
+                        print(f"   Reference coordinates: RA={extracted_wcs['CRVAL1']}, Dec={extracted_wcs['CRVAL2']}")
+            except Exception as e:
+                print(f"   Extracted WCS keywords (summary unavailable: {e})")
         else:
             print(f"   No WCS keywords found in file")
             
         return extracted_wcs
         
     except Exception as e:
-        raise WCSExtractionError(f"Error extracting WCS from {wcs_file_path}: {e}")
+        # Safely format exception message to avoid formatting errors
+        try:
+            error_msg = str(e)
+        except Exception:
+            error_msg = f"Exception of type {type(e).__name__}"
+        raise WCSExtractionError(f"Error extracting WCS from {wcs_file_path}: {error_msg}")
 
 
 def extract_wcs_from_astrometry_net(job_id: str, temp_dir: str = ".") -> Dict[str, Union[str, float, int]]:
@@ -526,8 +572,14 @@ def apply_wcs_to_fits(fits_file_path: str, wcs_data: Dict[str, Union[str, float,
             # Add new WCS keywords
             keywords_updated = 0
             for keyword, value in wcs_data.items():
-                header[keyword] = value
-                keywords_updated += 1
+                # Skip None values to avoid formatting errors
+                if value is not None:
+                    try:
+                        header[keyword] = value
+                        keywords_updated += 1
+                    except Exception as e:
+                        # Log but don't fail if a single keyword can't be set
+                        print(f"   Warning: Could not set {keyword}: {e}")
                 # logger.debug(f"Updated {keyword}: {value}") # Debug info removed
             
             # Add a comment indicating the file was plate solved
@@ -539,7 +591,12 @@ def apply_wcs_to_fits(fits_file_path: str, wcs_data: Dict[str, Union[str, float,
         # logger.info(f"Successfully updated {keywords_updated} WCS headers in {fits_file_path}") # Debug info removed
         
     except Exception as e:
-        raise WCSApplicationError(f"Error applying WCS to {fits_file_path}: {e}")
+        # Safely format exception message to avoid formatting errors
+        try:
+            error_msg = str(e)
+        except Exception:
+            error_msg = f"Exception of type {type(e).__name__}"
+        raise WCSApplicationError(f"Error applying WCS to {fits_file_path}: {error_msg}")
 
 
 def extract_existing_wcs_info(fits_file_path: str) -> Tuple[Optional[float], Optional[float], Optional[float]]:
