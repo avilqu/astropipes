@@ -534,7 +534,7 @@ class AstroLibraryGUI(QMainWindow):
         except Exception as e:
             print(f"Error refreshing database connection: {e}")
         
-        # Reload the database
+        # Reload the database (on_data_loaded will refresh the sidebar)
         self.load_database()
     
     def load_database(self):
@@ -554,6 +554,8 @@ class AstroLibraryGUI(QMainWindow):
         """Handle loaded database data."""
         self.fits_files = fits_files
         self.table_widget.populate_table(fits_files)
+        # Refresh the sidebar to reflect new counts
+        self.left_panel.repopulate_targets_and_dates()
         # If main_table_widget is visible, repopulate it with the correct filter
         if self.right_stack.currentIndex() == 1:
             if self.last_menu_category == "target":
@@ -728,6 +730,8 @@ class AstroLibraryGUI(QMainWindow):
         try:
             db_access.refresh_database()
             self.load_database()
+            # Refresh the sidebar to reflect new counts
+            self.left_panel.repopulate_targets_and_dates()
             QMessageBox.information(self, "Database Refreshed", "Database has been refreshed from disk.")
         except Exception as e:
             QMessageBox.critical(self, "Refresh Failed", f"Failed to refresh database: {e}")
