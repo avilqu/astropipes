@@ -4,6 +4,8 @@ from PyQt6.QtGui import QFont, QBrush, QColor
 from lib.db import get_db_manager
 from lib.db.edit import rename_target_across_database
 from lib.gui.library.context_dropdown import build_sidebar_target_menu
+from lib.gui.library.masters_generation_thread import MastersGenerationThread
+from lib.gui.common.console_window import ConsoleOutputWindow
 from config import TIME_DISPLAY_MODE, ARCHIVE_PATH
 
 class LeftPanel(QWidget):
@@ -149,6 +151,81 @@ class LeftPanel(QWidget):
                     QMessageBox.information(self, "Rename Target", msg)
                     self.refresh_counts()
                     self.target_renamed.emit(target_name, new_name.strip())
+            def generate_masters():
+                """Generate masters for the target: calibrate, align, integrate all images per filter."""
+                try:
+                    db = get_db_manager()
+                    files = db.get_files_by_target(target_name)
+                    
+                    if not files:
+                        QMessageBox.warning(self, "No Files", f"No files found for target '{target_name}'.")
+                        return
+                    
+                    # Show console window
+                    console_window = ConsoleOutputWindow(f"Generating Masters: {target_name}", self)
+                    console_window.show_and_raise()
+                    
+                    # Ensure threads are kept alive
+                    if not hasattr(self, '_masters_generation_threads'):
+                        self._masters_generation_threads = []
+                    
+                    # Create masters generation thread
+                    thread = MastersGenerationThread(target_name, files)
+                    self._masters_generation_threads.append(thread)
+                    
+                    def on_output(text):
+                        console_window.append_text(text)
+                    
+                    def on_finished(result):
+                        # Remove thread from list
+                        if thread in self._masters_generation_threads:
+                            self._masters_generation_threads.remove(thread)
+                        
+                        if result.get('error'):
+                            console_window.append_text(f"\n{result['error']}\n")
+                            return
+                        
+                        if result.get('success'):
+                            console_window.append_text(f"\n✓ Masters generation completed successfully!\n")
+                            console_window.append_text(f"Processed {result.get('total_filters', 0)} filter(s)\n")
+                            console_window.append_text(f"Successful: {result.get('successful_filters', 0)}\n")
+                            console_window.append_text(f"Failed: {result.get('failed_filters', 0)}\n")
+                            
+                            # Show summary dialog
+                            summary = f"Masters generation completed for target '{target_name}'.\n\n"
+                            summary += f"Filters processed: {result.get('total_filters', 0)}\n"
+                            summary += f"Successful: {result.get('successful_filters', 0)}\n"
+                            summary += f"Failed: {result.get('failed_filters', 0)}\n\n"
+                            
+                            if result.get('results'):
+                                summary += "Results:\n"
+                                for filter_name, filter_result in result['results'].items():
+                                    if filter_result.get('success'):
+                                        summary += f"  {filter_name}: ✓ Integrated image saved\n"
+                                    else:
+                                        summary += f"  {filter_name}: ✗ {filter_result.get('error', 'Unknown error')}\n"
+                            
+                            QMessageBox.information(self, "Masters Generation Complete", summary)
+                        else:
+                            console_window.append_text(f"\n✗ Masters generation failed\n")
+                    
+                    # Connect signals
+                    thread.output.connect(on_output)
+                    thread.finished.connect(on_finished)
+                    console_window.cancel_requested.connect(thread.stop)
+                    
+                    # Start generation
+                    console_window.append_text(f"Starting masters generation for target: {target_name}\n")
+                    console_window.append_text(f"Total files: {len(files)}\n\n")
+                    thread.start()
+                    
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, 
+                        "Masters Generation Error", 
+                        f"An error occurred while starting masters generation:\n{str(e)}"
+                    )
+            
             def move_to_archive():
                 # Confirm the action
                 reply = QMessageBox.question(
@@ -192,7 +269,8 @@ class LeftPanel(QWidget):
                 target_name=target_name, 
                 show_info_callback=show_info, 
                 rename_target_callback=rename_target,
-                move_to_archive_callback=move_to_archive
+                move_to_archive_callback=move_to_archive,
+                generate_masters_callback=generate_masters
             )
             menu.exec(self.menu_tree.viewport().mapToGlobal(pos))
 

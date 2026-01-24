@@ -101,13 +101,22 @@ def build_empty_menu(parent=None):
     menu.addAction("No actions available (empty menu)")
     return menu 
 
-def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=None, rename_target_callback=None, move_to_archive_callback=None):
+def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=None, rename_target_callback=None, move_to_archive_callback=None, generate_masters_callback=None):
     menu = QMenu(parent)
     # Add rename action
     rename_action = QAction("Rename target", menu)
     if rename_target_callback:
         rename_action.triggered.connect(rename_target_callback)
     menu.addAction(rename_action)
+    
+    # Add separator before generate masters action
+    menu.addSeparator()
+    
+    # Add generate masters action
+    generate_masters_action = QAction("Generate masters", menu)
+    if generate_masters_callback:
+        generate_masters_action.triggered.connect(generate_masters_callback)
+    menu.addAction(generate_masters_action)
     
     # Add separator before archive action
     menu.addSeparator()
