@@ -130,14 +130,23 @@ class RunSummaryWidget(QWidget):
         self.indicator_label.setStyleSheet("color: #2c3e50; margin-right: 8px;")
         layout.addWidget(self.indicator_label)
         
-        # Create summary text
+        # Create summary text (without comment)
         summary_text = self._build_summary_text()
         
-        # Create label with custom styling
-        label = QLabel(summary_text)
-        label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        # Create label with custom styling (bold)
+        self.summary_label = QLabel(summary_text)
+        self.summary_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout.addWidget(self.summary_label)
         
-        layout.addWidget(label)
+        # Create comment label if comment exists (darker, not bold)
+        comment = self.run_data.get('comment')
+        if comment:
+            self.comment_label = QLabel(f" | {comment}")
+            self.comment_label.setFont(QFont("Arial", 10, QFont.Weight.Normal))
+            # Use a lighter gray color
+            self.comment_label.setStyleSheet("color: #aaa;")
+            layout.addWidget(self.comment_label)
+        
         layout.addStretch()
     
     def set_expanded(self, expanded):
@@ -165,12 +174,8 @@ class RunSummaryWidget(QWidget):
         # Format exposures
         exposure_str = ", ".join([f"{exp:.1f}s" for exp in sorted(set(exposures))]) if exposures else "-"
         
-        # Build base summary
+        # Build base summary (without comment - comment is displayed separately)
         summary = f"{date_time_str} / {target} / {count} files / {binning} / {filter_str} / {exposure_str} / Total: {total_minutes}mn"
-        
-        # Add comment if present
-        if comment:
-            summary += f" | Comment: {comment}"
         
         return summary
 
