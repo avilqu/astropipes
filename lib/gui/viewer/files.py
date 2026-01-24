@@ -58,6 +58,7 @@ class FileOperationsMixin:
             self.setWindowTitle("Astropipes FITS Viewer")
             self.header_button.setEnabled(False)
             self.close_action.setEnabled(False)
+            self.delete_action.setEnabled(False)
             
             # Disable all image-dependent buttons
             self.update_button_states_for_no_image()
@@ -85,6 +86,7 @@ class FileOperationsMixin:
         self.update_align_button_visibility()
         self.update_platesolve_button_visibility()
         self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # Update file list window if open
         if hasattr(self, '_filelist_window') and self._filelist_window is not None:
@@ -97,14 +99,156 @@ class FileOperationsMixin:
             if self.current_file_index >= 0:
                 self._filelist_window.select_row(self.current_file_index)
 
+    def delete_current_file(self):
+        """Delete the currently displayed FITS file from disk and remove it from the image list."""
+        if not self.loaded_files or self.current_file_index < 0:
+            return
+        
+        # Get the file to delete
+        file_to_delete = self.loaded_files[self.current_file_index]
+        file_name = os.path.basename(file_to_delete)
+        
+        # Show confirmation dialog
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Delete File",
+            f"Are you sure you want to delete '{file_name}'?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Check if file exists in database and delete it
+        db_deleted = False
+        try:
+            from lib.db.manager import get_db_manager
+            db_manager = get_db_manager()
+            db_entry = db_manager.get_fits_file_by_path(file_to_delete)
+            if db_entry:
+                # File exists in database, delete it
+                if db_manager.delete_fits_file(db_entry.id):
+                    db_deleted = True
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Database Delete Failed",
+                        f"File '{file_name}' was found in the database but could not be deleted from it."
+                    )
+        except Exception as e:
+            # Log error but continue with file deletion
+            print(f"Error checking/deleting from database: {e}")
+        
+        # Try to delete the file from disk
+        try:
+            if os.path.exists(file_to_delete):
+                os.remove(file_to_delete)
+            else:
+                if not db_deleted:
+                    QMessageBox.warning(
+                        self,
+                        "File Not Found",
+                        f"File '{file_name}' was not found on disk. It will be removed from the viewer only."
+                    )
+                else:
+                    # File was deleted from database but not found on disk - that's okay
+                    pass
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Delete Failed",
+                f"Failed to delete file '{file_name}':\n{str(e)}"
+            )
+            return
+        
+        # Remove the current file from the list (same logic as close_current_file)
+        removed_file = self.loaded_files.pop(self.current_file_index)
+        
+        # Remove from preloaded data
+        if removed_file in self._preloaded_fits:
+            del self._preloaded_fits[removed_file]
+        
+        # Update current file index
+        if not self.loaded_files:
+            # No files left - completely reset the viewer state
+            self.current_file_index = -1
+            self.image_data = None
+            self.wcs = None
+            self._current_header = None
+            self.pixmap = None
+            self._orig_pixmap = None
+            
+            # Clear the image label and set proper styling for text display
+            self.image_label.clear()
+            self.image_label.setText("No image loaded")
+            self.image_label.setStyleSheet("QLabel { background-color: #f0f0f0; color: #333333; font-size: 14px; }")
+            self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # Reset the label size to allow proper text display
+            self.image_label.setFixedSize(400, 300)
+            
+            # Center the label in the scroll area
+            self.scroll_area.setWidgetResizable(True)
+            self.scroll_area.ensureWidgetVisible(self.image_label)
+            
+            self.setWindowTitle("Astropipes FITS Viewer")
+            self.header_button.setEnabled(False)
+            self.close_action.setEnabled(False)
+            self.delete_action.setEnabled(False)
+            
+            # Disable all image-dependent buttons
+            self.update_button_states_for_no_image()
+            
+            # Clear any overlays
+            self._simbad_overlay = None
+            self._simbad_field_overlay = None
+            self._sso_overlay = None
+            self._ephemeris_overlay = None
+            self._measurement_overlay = None
+            self._overlay_visible = False
+            if hasattr(self, 'overlay_toolbar_controller'):
+                self.overlay_toolbar_controller.update_overlay_button_visibility()
+        else:
+            # Adjust current index if necessary
+            if self.current_file_index >= len(self.loaded_files):
+                self.current_file_index = len(self.loaded_files) - 1
+            
+            # Load the new current file
+            self.load_fits(self.loaded_files[self.current_file_index], restore_view=False)
+        
+        # Update UI elements
+        self.update_navigation_buttons()
+        self.update_image_count_label()
+        self.update_align_button_visibility()
+        self.update_platesolve_button_visibility()
+        self.update_close_button_visibility()
+        self.update_delete_button_visibility()
+        
+        # Update file list window if open
+        if hasattr(self, '_filelist_window') and self._filelist_window is not None:
+            self._filelist_window.table.setRowCount(len(self.loaded_files))
+            for i, path in enumerate(self.loaded_files):
+                item = QTableWidgetItem(os.path.basename(path))
+                item.setToolTip(path)
+                self._filelist_window.table.setItem(i, 0, item)
+            self._filelist_window.file_paths = list(self.loaded_files)
+            if self.current_file_index >= 0:
+                self._filelist_window.select_row(self.current_file_index)
+        
+        # Note: Library windows will automatically refresh via file watcher when database changes
+
     def open_and_add_file(self, fits_path):
         """Open and add a FITS file to the loaded files list."""
         # Clean up temporary aligned files if loading a new file that's not part of current set
         if self.loaded_files and fits_path not in self.loaded_files:
             # Check if current files are temporary aligned files
+            import config
+            aligned_path = os.path.join(config.PROCESSED_PATH, "aligned")
             current_files_are_temp = all(
                 os.path.basename(path).startswith('aligned_') and 
-                '/tmp/astropipes/aligned/' in path 
+                aligned_path in path 
                 for path in self.loaded_files
             )
             if current_files_are_temp:
@@ -142,6 +286,7 @@ class FileOperationsMixin:
         self.update_align_button_visibility()
         self.update_platesolve_button_visibility()
         self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # Update file list window if open
         if hasattr(self, '_filelist_window') and self._filelist_window is not None:
@@ -198,6 +343,7 @@ class FileOperationsMixin:
         self.update_align_button_visibility()
         self.update_platesolve_button_visibility()
         self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # Update highlight in file list window
         if hasattr(self, '_filelist_window') and self._filelist_window is not None:
@@ -231,6 +377,7 @@ class FileOperationsMixin:
         self.update_align_button_visibility()
         self.update_platesolve_button_visibility()
         self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # Update highlight in file list window
         if hasattr(self, '_filelist_window') and self._filelist_window is not None:
@@ -298,6 +445,7 @@ class FileOperationsMixin:
         self.update_navigation_buttons()
         self.update_image_count_label()
         self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # After loading, update ephemeris marker if present
         self.update_ephemeris_marker()
@@ -579,6 +727,7 @@ class FileOperationsMixin:
                 self.update_align_button_visibility()
                 self.update_platesolve_button_visibility()
                 self.update_close_button_visibility()
+                self.update_delete_button_visibility()
                 # Update highlight in file list window
                 if hasattr(self, '_filelist_window') and self._filelist_window is not None:
                     self._filelist_window.select_row(row)

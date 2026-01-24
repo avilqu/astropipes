@@ -5,6 +5,7 @@ Database operations and threading for the GUI.
 import os
 from PyQt6.QtCore import QThread, pyqtSignal
 from lib.db import get_db_manager
+import config
 
 
 class DatabaseLoaderThread(QThread):
@@ -108,21 +109,36 @@ class DatabaseManager:
 
 def refresh_database():
     """
-    Reload the database from disk. This is a placeholder for any logic needed to refresh the DB if modified externally.
-    For SQLite, this is typically just a reload in the GUI, but this function is a hook for future expansion.
+    Reload the database from disk. This ensures we get fresh data from the database
+    by forcing SQLite to see the latest changes.
     """
-    # In most cases, just reloading the data in the GUI is sufficient.
-    # This function is a placeholder for any future logic (e.g., closing/reopening connections).
-    pass
+    try:
+        import lib.db.manager as db_module
+        # Force SQLite to see the latest changes by disposing and recreating the engine
+        # This ensures we're not using cached connections
+        if db_module.db_manager is not None and db_module.db_manager.engine:
+            # Dispose the engine to close all connections and force fresh reads
+            db_module.db_manager.engine.dispose()
+            # Reinitialize the database to recreate the engine
+            db_module.db_manager._initialize_database()
+    except Exception as e:
+        print(f"Error refreshing database connection: {e}")
 
 def cleanup_temp_directories():
     """
-    Delete all files in /tmp/astropipes/solved, /tmp/astropipes/calibrated, /tmp/astropipes/stacked, and /tmp/astropipes/aligned.
+    Delete all files in PROCESSED_PATH/solved, PROCESSED_PATH/calibrated, PROCESSED_PATH/stacked, PROCESSED_PATH/aligned, and PROCESSED_PATH/substacks.
     """
     import shutil
     import glob
     import os
-    temp_dirs = ["/tmp/astropipes/solved", "/tmp/astropipes/calibrated", "/tmp/astropipes/stacked", "/tmp/astropipes/aligned"]
+    base_path = config.PROCESSED_PATH
+    temp_dirs = [
+        os.path.join(base_path, "solved"),
+        os.path.join(base_path, "calibrated"),
+        os.path.join(base_path, "stacked"),
+        os.path.join(base_path, "aligned"),
+        os.path.join(base_path, "substacks")
+    ]
     for temp_dir in temp_dirs:
         if os.path.exists(temp_dir):
             for filename in glob.glob(os.path.join(temp_dir, "*")):

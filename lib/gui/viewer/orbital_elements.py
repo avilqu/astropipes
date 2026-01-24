@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timedelta
 import json
 from scipy.optimize import least_squares
+import config
 
 class OrbitDataWindow(QMainWindow):
     row_selected = pyqtSignal(int, object)  # row index, ephemeris tuple
@@ -291,7 +292,7 @@ class OrbitDataWindow(QMainWindow):
         object_name = getattr(self.parent_viewer, '_ephemeris_object_name', 'Unknown_Object')
         
         # Create output directory
-        output_dir = "/tmp/astropipes/substacks"
+        output_dir = os.path.join(config.PROCESSED_PATH, "substacks")
         os.makedirs(output_dir, exist_ok=True)
         
         # Generate timestamp for unique filenames

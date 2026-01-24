@@ -361,6 +361,10 @@ class NavigationMixin:
     def update_close_button_visibility(self):
         """Update the close button enabled state based on whether files are loaded."""
         self.toolbar_controller.update_close_button_visibility()
+    
+    def update_delete_button_visibility(self):
+        """Update the delete button enabled state based on whether files are loaded."""
+        self.toolbar_controller.update_delete_button_visibility()
 
     def update_button_states_for_no_image(self):
         """Disable all buttons that require an image to be loaded."""

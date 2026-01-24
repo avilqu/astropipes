@@ -1146,6 +1146,7 @@ class OverlayMixin:
         self.current_file_index = row_index
         self.load_fits(self.loaded_files[row_index], restore_view=True)
         self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # The ephemeris marker will be updated by the load_fits method calling update_ephemeris_marker
         self.image_label.update()
@@ -1189,6 +1190,7 @@ class OverlayMixin:
             self.current_file_index = file_index
             self.load_fits(self.loaded_files[file_index], restore_view=True)
             self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # The computed positions marker will be updated by the load_fits method calling update_computed_positions_marker
         self.image_label.update() 

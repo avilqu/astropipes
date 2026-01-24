@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QApplication, QDialog,
 
 # Import configuration
 from config import (DEFAULT_ALIGNMENT_METHOD, FALLBACK_ALIGNMENT_METHOD, SHOW_ALIGNMENT_METHOD_DIALOG, MAX_ALIGNMENT_IMAGES,
-                   ALIGNMENT_MEMORY_LIMIT, ALIGNMENT_CHUNK_SIZE, ALIGNMENT_ENABLE_CHUNKED, ALIGNMENT_SAVE_PROGRESSIVE)
+                   ALIGNMENT_MEMORY_LIMIT, ALIGNMENT_CHUNK_SIZE, ALIGNMENT_ENABLE_CHUNKED, ALIGNMENT_SAVE_PROGRESSIVE, PROCESSED_PATH)
 
 
 class AlignmentMethodDialog(QDialog):
@@ -412,7 +412,7 @@ class ImageOperationsMixin:
             from astropy.io import fits
             
             # Create the base aligned directory
-            base_aligned_dir = "/tmp/astropipes/aligned"
+            base_aligned_dir = os.path.join(PROCESSED_PATH, "aligned")
             os.makedirs(base_aligned_dir, exist_ok=True)
             
             # Create a unique subdirectory for this alignment session

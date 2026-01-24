@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, 
     QMenuBar, QMessageBox, QProgressBar, QStatusBar, QSplitter, QStackedWidget, QDialog, QPushButton, QRadioButton, QHBoxLayout, QSpinBox, QGroupBox, QFileDialog, QLineEdit, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QFileSystemWatcher
 from PyQt6.QtGui import QAction
 
 # Import our modular components
@@ -364,6 +364,7 @@ class AstroLibraryGUI(QMainWindow):
         self.console_window = None  # For scan output
         self.init_ui()
         self.connect_signals()
+        self.setup_database_watcher()
         self.load_database()
     
     def init_ui(self):
@@ -453,6 +454,88 @@ class AstroLibraryGUI(QMainWindow):
         # Menu selection
         self.left_panel.menu_selection_changed.connect(self.on_menu_selection_changed)
         self.left_panel.target_renamed.connect(lambda old, new: self.load_database())
+    
+    def setup_database_watcher(self):
+        """Set up a file system watcher to monitor the database file for changes."""
+        import os
+        import config
+        
+        # Create file system watcher
+        self.db_watcher = QFileSystemWatcher(self)
+        
+        # Add the database file and related SQLite files to watch
+        db_path = config.DATABASE_PATH
+        db_dir = os.path.dirname(db_path) if os.path.dirname(db_path) else '.'
+        db_basename = os.path.basename(db_path)
+        
+        # Watch the database directory for changes (catches all SQLite files)
+        if os.path.exists(db_dir):
+            self.db_watcher.addPath(db_dir)
+            self.db_watcher.directoryChanged.connect(self.on_database_directory_changed)
+        
+        # Also watch the main database file if it exists
+        if os.path.exists(db_path):
+            self.db_watcher.addPath(db_path)
+            self.db_watcher.fileChanged.connect(self.on_database_file_changed)
+        
+        # Watch SQLite journal and WAL files (SQLite may write to these)
+        journal_path = db_path + '-journal'
+        wal_path = db_path + '-wal'
+        shm_path = db_path + '-shm'
+        
+        for sqlite_file in [journal_path, wal_path, shm_path]:
+            if os.path.exists(sqlite_file):
+                self.db_watcher.addPath(sqlite_file)
+                self.db_watcher.fileChanged.connect(self.on_database_file_changed)
+    
+    def on_database_file_changed(self, path):
+        """Handle database file change event."""
+        # Debounce: use a timer to avoid multiple rapid refreshes
+        if not hasattr(self, '_refresh_timer'):
+            from PyQt6.QtCore import QTimer
+            self._refresh_timer = QTimer(self)
+            self._refresh_timer.setSingleShot(True)
+            self._refresh_timer.timeout.connect(self._perform_database_refresh)
+        
+        # Restart the timer (debounce for 500ms)
+        self._refresh_timer.stop()
+        self._refresh_timer.start(500)
+    
+    def on_database_directory_changed(self, path):
+        """Handle database directory change event (e.g., database file created or SQLite journal files changed)."""
+        import os
+        import config
+        db_path = config.DATABASE_PATH
+        db_basename = os.path.basename(db_path)
+        
+        # Check if the main database file exists and add it to watcher if not already watching
+        if os.path.exists(db_path) and db_path not in self.db_watcher.files():
+            self.db_watcher.addPath(db_path)
+            if not self.db_watcher.receivers(self.db_watcher.fileChanged):
+                self.db_watcher.fileChanged.connect(self.on_database_file_changed)
+        
+        # Check for SQLite journal/WAL files and add them if they exist
+        for suffix in ['-journal', '-wal', '-shm']:
+            sqlite_file = db_path + suffix
+            if os.path.exists(sqlite_file) and sqlite_file not in self.db_watcher.files():
+                self.db_watcher.addPath(sqlite_file)
+                if not self.db_watcher.receivers(self.db_watcher.fileChanged):
+                    self.db_watcher.fileChanged.connect(self.on_database_file_changed)
+        
+        # Trigger refresh when directory changes (SQLite may have written journal/WAL files)
+        self.on_database_file_changed(db_path)
+    
+    def _perform_database_refresh(self):
+        """Perform the actual database refresh after debounce."""
+        # Refresh the database connection
+        from . import db_access
+        try:
+            db_access.refresh_database()
+        except Exception as e:
+            print(f"Error refreshing database connection: {e}")
+        
+        # Reload the database
+        self.load_database()
     
     def load_database(self):
         """Load FITS files from the database."""
@@ -650,13 +733,13 @@ class AstroLibraryGUI(QMainWindow):
             QMessageBox.critical(self, "Refresh Failed", f"Failed to refresh database: {e}")
 
     def cleanup_temp_directories(self):
-        """Delete all files in /tmp/astropipes/solved, /tmp/astropipes/calibrated, /tmp/astropipes/stacked, and /tmp/astropipes/aligned."""
+        """Delete all files in PROCESSED_PATH subdirectories (solved, calibrated, stacked, aligned, substacks)."""
         from . import db_access
         try:
             db_access.cleanup_temp_directories()
-            QMessageBox.information(self, "Cleanup Complete", "Temporary directories have been cleaned up.")
+            QMessageBox.information(self, "Cleanup Complete", "Processed directories have been cleaned up.")
         except Exception as e:
-            QMessageBox.critical(self, "Cleanup Failed", f"Failed to clean up temp directories: {e}")
+            QMessageBox.critical(self, "Cleanup Failed", f"Failed to clean up processed directories: {e}")
 
 
 def main():

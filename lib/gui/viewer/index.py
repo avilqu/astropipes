@@ -78,6 +78,7 @@ class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, File
         self.image_count_label = self.toolbar_controller.image_count_label
         self.load_action = self.toolbar_controller.load_action
         self.close_action = self.toolbar_controller.close_action
+        self.delete_action = self.toolbar_controller.delete_action
         self.reset_zoom_action = self.toolbar_controller.reset_zoom_action
         self.zoom_to_fit_action = self.toolbar_controller.zoom_to_fit_action
         self.zoom_region_action = self.toolbar_controller.zoom_region_action
@@ -127,6 +128,7 @@ class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, File
         self.update_align_button_visibility()
         self.update_platesolve_button_visibility()
         self.update_close_button_visibility()
+        self.update_delete_button_visibility()
         
         # Set initial button states (disabled if no image loaded)
         if not fits_path:

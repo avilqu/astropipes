@@ -6,7 +6,7 @@ from PyQt6.QtCore import QThread, QObject, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox, QDialog
 from lib.gui.viewer.orbital_elements import OrbitComputationDialog, OrbitComputationWorker, OrbitDataWindow
 from lib.gui.common.console_window import ConsoleOutputWindow
-from config import MOTION_TRACKING_SIGMA_CLIP, MOTION_TRACKING_METHOD, MOTION_TRACKING_CREATE_BOTH_STACKS
+from config import MOTION_TRACKING_SIGMA_CLIP, MOTION_TRACKING_METHOD, MOTION_TRACKING_CREATE_BOTH_STACKS, PROCESSED_PATH
 
 
 class MotionTrackingStackWorker(QObject):
@@ -228,7 +228,7 @@ class IntegrationMixin:
             return
         
         # Create output directory if it doesn't exist
-        output_dir = "/tmp/astropipes/stacked"
+        output_dir = os.path.join(PROCESSED_PATH, "stacked")
         os.makedirs(output_dir, exist_ok=True)
         
         # Generate output filename

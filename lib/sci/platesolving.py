@@ -14,6 +14,7 @@ import subprocess
 from subprocess import run, TimeoutExpired
 import shutil
 from colorama import Style, Fore
+import config
 
 # Import catalog classes from new location
 from lib.sci.catalogs import SolarSystemObject, SIMBADObject, GaiaObject, AstrometryCatalog
@@ -79,7 +80,7 @@ class AstrometryEngine:
     """Interface to the astrometry.net solve-field engine."""
     
     def __init__(self, solve_field_path: str = "solve-field", 
-                 output_dir: str = "/tmp/astropipes/solved", timeout: int = 300):
+                 output_dir: str = None, timeout: int = 300):
         """
         Initialize the astrometry engine interface.
         
@@ -88,11 +89,13 @@ class AstrometryEngine:
         solve_field_path : str
             Path to the solve-field executable
         output_dir : str
-            Directory for temporary output files
+            Directory for temporary output files. If None, uses PROCESSED_PATH/solved from config.
         timeout : int
             Timeout in seconds for solve-field execution
         """
         self.solve_field_path = solve_field_path
+        if output_dir is None:
+            output_dir = os.path.join(config.PROCESSED_PATH, "solved")
         self.output_dir = output_dir
         self.timeout = timeout
         
@@ -368,7 +371,7 @@ class AstrometryEngine:
 
 def solve_single_image(fits_file_path: str, 
                       solve_field_path: str = "solve-field",
-                      output_dir: str = "/tmp/astropipes/solved",
+                      output_dir: str = None,
                       timeout: int = 300,
                       apply_solution: bool = True,
                       output_callback=None,
@@ -389,8 +392,8 @@ def solve_single_image(fits_file_path: str,
         Path to the FITS file to solve
     solve_field_path : str
         Path to the solve-field executable
-    output_dir : str
-        Directory for temporary output files
+    output_dir : str, optional
+        Directory for temporary output files. If None, uses PROCESSED_PATH/solved from config.
     timeout : int
         Timeout in seconds for solve-field execution
     apply_solution : bool
@@ -402,6 +405,10 @@ def solve_single_image(fits_file_path: str,
         Result of the platesolving operation
     """
     try:
+        # Set default output_dir if not provided
+        if output_dir is None:
+            output_dir = os.path.join(config.PROCESSED_PATH, "solved")
+        
         # Step 1: Validate the FITS file
         if output_callback:
             output_callback(f"{Style.BRIGHT + Fore.BLUE}Validating FITS file...{Style.RESET_ALL}\n")

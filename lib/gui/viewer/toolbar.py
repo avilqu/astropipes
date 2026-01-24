@@ -220,6 +220,19 @@ class ToolbarController:
         self.toolbar.addAction(self.close_action)
         self.toolbar.widgetForAction(self.close_action).setFixedSize(32, 32)
 
+        # Delete button
+        delete_icon = QIcon.fromTheme("edit-delete-remove")
+        if delete_icon.isNull():
+            delete_icon = QIcon.fromTheme("edit-delete")
+        if delete_icon.isNull():
+            delete_icon = QIcon.fromTheme("delete")
+        self.delete_action = QAction(delete_icon, "Delete FITS", self.parent)
+        self.delete_action.setToolTip("Delete current FITS file from disk")
+        self.delete_action.setEnabled(False)  # Initially disabled until a file is loaded
+        self.delete_action.triggered.connect(self.parent.delete_current_file)
+        self.toolbar.addAction(self.delete_action)
+        self.toolbar.widgetForAction(self.delete_action).setFixedSize(32, 32)
+
         # Header button - moved from processing controls
         self.header_button = QAction(QIcon.fromTheme("view-financial-list"), "", self.parent)
         self.header_button.setToolTip("Show FITS header")
@@ -635,5 +648,9 @@ class ToolbarController:
     def update_close_button_visibility(self):
         """Update the close button enabled state based on whether files are loaded."""
         self.close_action.setEnabled(len(self.parent.loaded_files) > 0)
+    
+    def update_delete_button_visibility(self):
+        """Update the delete button enabled state based on whether files are loaded."""
+        self.delete_action.setEnabled(len(self.parent.loaded_files) > 0)
     
  

@@ -309,7 +309,7 @@ class CalibrationManager:
         Create and return a temporary directory for calibration files.
         
         Args:
-            output_dir: Optional custom output directory. If None, uses default /tmp location.
+            output_dir: Optional custom output directory. If None, uses PROCESSED_PATH/calibrated from config.
         
         Returns:
             Path to the temporary directory
@@ -317,7 +317,7 @@ class CalibrationManager:
         if output_dir:
             temp_dir = Path(output_dir)
         else:
-            temp_dir = Path("/tmp/astropipes/calibrated")
+            temp_dir = Path(config.PROCESSED_PATH) / "calibrated"
         temp_dir.mkdir(parents=True, exist_ok=True)
         return temp_dir
     
@@ -529,7 +529,7 @@ class CalibrationManager:
             file_path: Path to the FITS file to calibrate
             steps: Dictionary specifying which calibration steps to apply
                    {'bias': True, 'dark': True, 'flat': True}
-            output_dir: Optional custom output directory. If None, uses default /tmp location.
+            output_dir: Optional custom output directory. If None, uses PROCESSED_PATH/calibrated from config.
             
         Returns:
             Dictionary containing calibration results
@@ -633,7 +633,7 @@ class CalibrationManager:
         
         Args:
             file_path: Path to the FITS file to calibrate
-            output_dir: Optional custom output directory. If None, uses default /tmp location.
+            output_dir: Optional custom output directory. If None, uses PROCESSED_PATH/calibrated from config.
             
         Returns:
             Dictionary containing calibration results
