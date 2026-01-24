@@ -20,6 +20,7 @@ from .obslog import FitsTableWidget
 from .main_table import MainFitsTableWidget
 from .sidebar import LeftPanel
 from .calibration_tables import MasterDarksTableWidget, MasterBiasTableWidget, MasterFlatsTableWidget
+from .mpc_log_table import MPCLogTableWidget
 from lib.db import get_db_manager
 from lib.db.models import CalibrationMaster
 from lib.gui.library.menu_bar import create_menu_bar
@@ -408,11 +409,13 @@ class AstroLibraryGUI(QMainWindow):
         self.master_darks_table = MasterDarksTableWidget()
         self.master_bias_table = MasterBiasTableWidget()
         self.master_flats_table = MasterFlatsTableWidget()
-        self.right_stack.addWidget(self.table_widget)  # index 0: Obs log
+        self.mpc_log_table = MPCLogTableWidget()
+        self.right_stack.addWidget(self.table_widget)  # index 0: Runs (obs log)
         self.right_stack.addWidget(self.main_table_widget)  # index 1: Main table (targets/dates)
         self.right_stack.addWidget(self.master_darks_table)  # index 2: Master darks
         self.right_stack.addWidget(self.master_bias_table)   # index 3: Master bias
         self.right_stack.addWidget(self.master_flats_table)  # index 4: Master flats
+        self.right_stack.addWidget(self.mpc_log_table)  # index 5: MPC Log
         splitter.addWidget(self.right_stack)
         splitter.setStretchFactor(1, 1)  # Make right panel expand more
         splitter.setSizes([self.left_panel.minimumWidth(), 1000])  # Left panel at min width
@@ -451,6 +454,9 @@ class AstroLibraryGUI(QMainWindow):
         self.table_widget.database_refresh_requested.connect(self.load_database)
         self.main_table_widget.platesolving_completed.connect(self.load_database)
         self.main_table_widget.database_refresh_requested.connect(self.load_database)
+        # Refresh MPC log table when database is refreshed
+        self.table_widget.database_refresh_requested.connect(self.refresh_mpc_log_table)
+        self.main_table_widget.database_refresh_requested.connect(self.refresh_mpc_log_table)
         # Menu selection
         self.left_panel.menu_selection_changed.connect(self.on_menu_selection_changed)
         self.left_panel.target_renamed.connect(lambda old, new: self.load_database())
@@ -593,8 +599,19 @@ class AstroLibraryGUI(QMainWindow):
         """Switch right panel content based on menu selection."""
         self.last_menu_category = category
         self.last_menu_value = value
-        if category == "obslog":
+        if category == "runs":
             self.right_stack.setCurrentIndex(0)
+        elif category == "mpc_log":
+            # Load MPC log entries from database
+            db = get_db_manager()
+            session = db.get_session()
+            try:
+                from lib.db.models import MPCLog
+                entries = session.query(MPCLog).order_by(MPCLog.observation_date.desc()).all()
+                self.mpc_log_table.populate(entries)
+            finally:
+                session.close()
+            self.right_stack.setCurrentIndex(5)
         elif category == "target":
             filtered = [f for f in self.fits_files if f.target == value]
             self.main_table_widget.populate_table(filtered)
@@ -707,7 +724,7 @@ class AstroLibraryGUI(QMainWindow):
         total = len(self.fits_files)
         current_index = self.right_stack.currentIndex()
         if current_index == 0:
-            # Obs log
+            # Runs (obs log)
             shown = self.table_widget.get_visible_file_count()
         elif current_index == 1:
             shown = self.main_table_widget.get_visible_file_count()
@@ -717,6 +734,9 @@ class AstroLibraryGUI(QMainWindow):
             shown = self.master_bias_table.get_visible_file_count()
         elif current_index == 4:
             shown = self.master_flats_table.get_visible_file_count()
+        elif current_index == 5:
+            # MPC Log
+            shown = self.mpc_log_table.get_visible_file_count()
         else:
             shown = 0
         self.status_label.setText(f"   Showing {shown} / {total} files")  # Add left padding
@@ -744,6 +764,18 @@ class AstroLibraryGUI(QMainWindow):
             QMessageBox.information(self, "Cleanup Complete", "Processed directories have been cleaned up.")
         except Exception as e:
             QMessageBox.critical(self, "Cleanup Failed", f"Failed to clean up processed directories: {e}")
+    
+    def refresh_mpc_log_table(self):
+        """Refresh the MPC log table if it's currently visible."""
+        if self.right_stack.currentIndex() == 5:
+            db = get_db_manager()
+            session = db.get_session()
+            try:
+                from lib.db.models import MPCLog
+                entries = session.query(MPCLog).order_by(MPCLog.observation_date.desc()).all()
+                self.mpc_log_table.populate(entries)
+            finally:
+                session.close()
 
 
 def main():

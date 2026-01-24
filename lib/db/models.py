@@ -148,4 +148,31 @@ class Run(Base):
     fits_files = relationship("FitsFile", back_populates="run")
     
     def __repr__(self):
-        return f"<Run(id={self.id}, target='{self.target}', start_time='{self.start_time}', end_time='{self.end_time}')>" 
+        return f"<Run(id={self.id}, target='{self.target}', start_time='{self.start_time}', end_time='{self.end_time}')>"
+
+class MPCLog(Base):
+    """Model representing a Minor Planet Center observation log entry."""
+    __tablename__ = 'mpc_log'
+    
+    # Primary key
+    id = Column(Integer, primary_key=True)
+    
+    # Observation information
+    observation_date = Column(DateTime, nullable=False)  # Start of observation
+    target_name = Column(String, nullable=False)
+    ra_center = Column(Float)  # Right Ascension of first image (degrees)
+    dec_center = Column(Float)  # Declination of first image (degrees)
+    
+    # Observation parameters
+    num_images = Column(Integer, nullable=False)
+    single_exposure = Column(Float)  # Single image exposure time (seconds)
+    total_exposure = Column(Float)  # Total exposure time (seconds)
+    magnitude = Column(Float)  # Magnitude
+    motion = Column(Float)  # Motion in arcseconds per minute ("/mn)
+    status = Column(String, nullable=False)  # 'Found' or 'Not Found'
+    
+    # Comment from the run
+    comment = Column(Text, nullable=True)
+    
+    def __repr__(self):
+        return f"<MPCLog(id={self.id}, target='{self.target_name}', date='{self.observation_date}', status='{self.status}')>" 

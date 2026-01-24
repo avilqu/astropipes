@@ -101,7 +101,7 @@ def build_empty_menu(parent=None):
     menu.addAction("No actions available (empty menu)")
     return menu 
 
-def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=None, rename_target_callback=None, move_to_archive_callback=None, generate_masters_callback=None):
+def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=None, rename_target_callback=None, move_to_archive_callback=None, generate_masters_callback=None, add_to_mpc_log_callback=None):
     menu = QMenu(parent)
     # Add rename action
     rename_action = QAction("Rename target", menu)
@@ -117,6 +117,15 @@ def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=
     if generate_masters_callback:
         generate_masters_action.triggered.connect(generate_masters_callback)
     menu.addAction(generate_masters_action)
+    
+    # Add separator before MPC log action
+    menu.addSeparator()
+    
+    # Add "Add to MPC log" action
+    add_mpc_action = QAction("Add to MPC log", menu)
+    if add_to_mpc_log_callback:
+        add_mpc_action.triggered.connect(add_to_mpc_log_callback)
+    menu.addAction(add_mpc_action)
     
     # Add separator before archive action
     menu.addSeparator()

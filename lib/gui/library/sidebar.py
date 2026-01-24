@@ -1,9 +1,11 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QInputDialog, QMessageBox, QDialog
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont, QBrush, QColor
 from lib.db import get_db_manager
 from lib.db.edit import rename_target_across_database
 from lib.gui.library.context_dropdown import build_sidebar_target_menu
+from lib.gui.library.mpc_log_dialog import MPCLogDialog
+from datetime import datetime
 from lib.gui.library.masters_generation_thread import MastersGenerationThread
 from lib.gui.common.console_window import ConsoleOutputWindow
 from config import TIME_DISPLAY_MODE, ARCHIVE_PATH
@@ -53,14 +55,24 @@ class LeftPanel(QWidget):
         self.targets_item.setFont(0, bold_font)
         self.obslog_item.setFont(0, bold_font)
         self.dates_item.setFont(0, bold_font)
+        
+        # Create darker brush for child items (used before calibration section)
+        self.darker_brush = QBrush(QColor("#bbbbbb"))
+        
+        # Add children to Obs log (Runs and MPC Log)
+        self.runs_item = QTreeWidgetItem(["Runs"])
+        self.runs_item.setForeground(0, self.darker_brush)
+        self.mpc_log_item = QTreeWidgetItem(["MPC Log"])
+        self.mpc_log_item.setForeground(0, self.darker_brush)
+        self.obslog_item.addChild(self.runs_item)
+        self.obslog_item.addChild(self.mpc_log_item)
+        
         # Calibration section
         self.calibration_item = QTreeWidgetItem(["Calibration"])
         self.calibration_item.setFont(0, bold_font)
         bias_count = db.get_calibration_file_count("Bias")
         darks_count = db.get_calibration_file_count("Dark")
         flats_count = db.get_calibration_file_count("Flat")
-
-        self.darker_brush = QBrush(QColor("#bbbbbb"))
         self.bias_item = QTreeWidgetItem([f"Bias ({bias_count})"])
         self.bias_item.setForeground(0, self.darker_brush)
         self.darks_item = QTreeWidgetItem([f"Darks ({darks_count})"])
@@ -89,9 +101,10 @@ class LeftPanel(QWidget):
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])
                 item.setForeground(0, self.darker_brush)
 
-        # Expand both Targets and Dates by default
+        # Expand Targets, Dates, and Obs log by default
         self.menu_tree.expandItem(self.targets_item)
         self.menu_tree.expandItem(self.dates_item)
+        self.menu_tree.expandItem(self.obslog_item)
 
         layout.addWidget(self.menu_tree)
         self.setMinimumWidth(200)
@@ -100,7 +113,12 @@ class LeftPanel(QWidget):
 
     def _emit_selection(self, current, previous):
         if current is self.obslog_item:
-            self.menu_selection_changed.emit("obslog", "")
+            # Don't emit for parent item, just expand/collapse
+            return
+        elif current is self.runs_item:
+            self.menu_selection_changed.emit("runs", "")
+        elif current is self.mpc_log_item:
+            self.menu_selection_changed.emit("mpc_log", "")
         elif current is self.targets_item:
             self.menu_selection_changed.emit("targets", "")
         elif current is self.dates_item:
@@ -264,19 +282,94 @@ class LeftPanel(QWidget):
                             f"An error occurred while archiving the target:\n{str(e)}"
                         )
             
+            def add_to_mpc_log():
+                """Add all files for this target to MPC log."""
+                db = get_db_manager()
+                files = db.get_files_by_target(target_name)
+                
+                if not files:
+                    QMessageBox.warning(self, "No Files", f"No files found for target '{target_name}'.")
+                    return
+                
+                # Open MPC log dialog
+                dialog = MPCLogDialog(self, target_name=target_name)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    # Validate input
+                    valid, error_msg = dialog.validate()
+                    if not valid:
+                        QMessageBox.warning(self, "Invalid Input", error_msg)
+                        return
+                    
+                    # Get values from dialog
+                    motion = dialog.get_motion()
+                    magnitude = dialog.get_magnitude()
+                    status = dialog.get_status()
+                    
+                    # Get observation date (start of observation - oldest file)
+                    dates = [f.date_obs for f in files if f.date_obs]
+                    if not dates:
+                        QMessageBox.warning(self, "Error", "Could not determine observation date.")
+                        return
+                    observation_date = min(dates)
+                    
+                    # Get coordinates from first image (oldest)
+                    first_file = min(files, key=lambda f: f.date_obs if f.date_obs else datetime.max)
+                    ra_center = first_file.ra_center
+                    dec_center = first_file.dec_center
+                    
+                    # Get number of images
+                    num_images = len(files)
+                    
+                    # Get single exposure (use first file's exposure)
+                    single_exposure = first_file.exptime if first_file.exptime else None
+                    
+                    # Calculate total exposure
+                    exposures = [f.exptime for f in files if f.exptime]
+                    total_exposure = sum(exposures) if exposures else None
+                    
+                    # No comment for target-level entries (or we could use empty string)
+                    comment = None
+                    
+                    # Prepare MPC log data
+                    mpc_data = {
+                        'observation_date': observation_date,
+                        'target_name': target_name,
+                        'ra_center': ra_center,
+                        'dec_center': dec_center,
+                        'num_images': num_images,
+                        'single_exposure': single_exposure,
+                        'total_exposure': total_exposure,
+                        'magnitude': magnitude,
+                        'motion': motion,
+                        'status': status,
+                        'comment': comment
+                    }
+                    
+                    try:
+                        db_manager = get_db_manager()
+                        db_manager.add_mpc_log_entry(mpc_data)
+                        QMessageBox.information(self, "Success", "Observation added to MPC log successfully.")
+                    except Exception as e:
+                        QMessageBox.critical(self, "Error", f"Failed to add observation to MPC log:\n{str(e)}")
+            
             menu = build_sidebar_target_menu(
                 self.menu_tree, 
                 target_name=target_name, 
                 show_info_callback=show_info, 
                 rename_target_callback=rename_target,
                 move_to_archive_callback=move_to_archive,
-                generate_masters_callback=generate_masters
+                generate_masters_callback=generate_masters,
+                add_to_mpc_log_callback=add_to_mpc_log
             )
             menu.exec(self.menu_tree.viewport().mapToGlobal(pos))
 
     def set_menu_index(self, index):
-        item = [self.obslog_item, self.targets_item, self.dates_item][index]
-        self.menu_tree.setCurrentItem(item)
+        # For backward compatibility, map index 0 to runs_item
+        if index == 0:
+            self.menu_tree.setCurrentItem(self.runs_item)
+        else:
+            item = [self.obslog_item, self.targets_item, self.dates_item][index]
+            self.menu_tree.setCurrentItem(item)
 
     def refresh_counts(self):
         """Refresh the file counts for all items in the tree."""
@@ -329,6 +422,7 @@ class LeftPanel(QWidget):
                 count = db.get_file_count_by_date(date)
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])
                 item.setForeground(0, self.darker_brush)
-        # Expand both Targets and Dates by default
+        # Expand Targets, Dates, and Obs log by default
         self.menu_tree.expandItem(self.targets_item)
-        self.menu_tree.expandItem(self.dates_item) 
+        self.menu_tree.expandItem(self.dates_item)
+        self.menu_tree.expandItem(self.obslog_item) 

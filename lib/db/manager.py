@@ -3,7 +3,7 @@ import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
-from .models import Base, FitsFile, Source, CalibrationMaster, Run
+from .models import Base, FitsFile, Source, CalibrationMaster, Run, MPCLog
 from config import to_display_time
 
 class DatabaseManager:
@@ -70,6 +70,12 @@ class DatabaseManager:
                     conn.execute(text("ALTER TABLE fits_files ADD COLUMN run_id INTEGER"))
                     conn.commit()
                 print("Added 'run_id' column to 'fits_files' table")
+        
+        # Check if mpc_log table exists
+        if 'mpc_log' not in existing_tables:
+            # Create mpc_log table using the model definition
+            MPCLog.__table__.create(self.engine, checkfirst=True)
+            print("Created 'mpc_log' table")
     
     def get_session(self) -> Session:
         """Get a new database session.
@@ -866,6 +872,40 @@ class DatabaseManager:
             if run:
                 run.start_time = result[0]
                 run.end_time = result[1]
+    
+    def add_mpc_log_entry(self, mpc_data: dict) -> MPCLog:
+        """Add a new MPC log entry to the database.
+        
+        Args:
+            mpc_data: Dictionary containing MPC log data with keys:
+                - observation_date: DateTime (start of observation)
+                - target_name: str
+                - ra_center: float (degrees)
+                - dec_center: float (degrees)
+                - num_images: int
+                - single_exposure: float (seconds)
+                - total_exposure: float (seconds)
+                - magnitude: float
+                - motion: float (arcseconds per minute)
+                - status: str ('Found' or 'Not Found')
+                - comment: str (optional)
+                
+        Returns:
+            The created MPCLog object
+        """
+        session = self.get_session()
+        try:
+            mpc_log = MPCLog(**mpc_data)
+            session.add(mpc_log)
+            session.commit()
+            session.refresh(mpc_log)
+            return mpc_log
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Error adding MPC log entry: {e}")
+            raise
+        finally:
+            session.close()
     
     def close(self):
         """Close the database connection."""

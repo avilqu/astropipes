@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QItemSelectionModel, QThread, pyqtSignal as Signal
 from PyQt6.QtGui import QFont, QPalette, QColor, QAction
 from .context_dropdown import build_single_file_menu, build_multi_file_menu, build_empty_menu, calibrate_and_compare_file, delete_files_with_confirmation
+from .mpc_log_dialog import MPCLogDialog
 import json
 from astropy.io import fits
 from lib.gui.common.header_window import HeaderViewer
@@ -918,10 +919,98 @@ class FitsTableWidget(QTableWidget):
                                     # Emit signal to refresh database
                                     self.database_refresh_requested.emit()
                         
+                        def add_to_mpc_log():
+                            """Add the run to MPC log."""
+                            run_data = data.get('run_data', {})
+                            run_files = data.get('run_files', [])
+                            
+                            if not run_files:
+                                QMessageBox.warning(self, "No Files", "This run has no files.")
+                                return
+                            
+                            # Get target name from run data
+                            target_name = run_data.get('target', 'Unknown')
+                            
+                            # Open MPC log dialog
+                            dialog = MPCLogDialog(self, target_name=target_name)
+                            if dialog.exec() == QDialog.DialogCode.Accepted:
+                                # Validate input (validate before processing)
+                                valid, error_msg = dialog.validate()
+                                if not valid:
+                                    QMessageBox.warning(self, "Invalid Input", error_msg)
+                                    return
+                                
+                                # Get values from dialog
+                                motion = dialog.get_motion()
+                                magnitude = dialog.get_magnitude()
+                                status = dialog.get_status()
+                                
+                                # Get run data
+                                # Observation date is start of observation (oldest file)
+                                dates = [f.date_obs for f in run_files if f.date_obs]
+                                if not dates:
+                                    QMessageBox.warning(self, "Error", "Could not determine observation date.")
+                                    return
+                                observation_date = min(dates)
+                                
+                                # Get coordinates from first image (oldest)
+                                first_file = min(run_files, key=lambda f: f.date_obs if f.date_obs else datetime.max)
+                                ra_center = first_file.ra_center
+                                dec_center = first_file.dec_center
+                                
+                                # Get number of images
+                                num_images = len(run_files)
+                                
+                                # Get single exposure (use first file's exposure)
+                                single_exposure = first_file.exptime if first_file.exptime else None
+                                
+                                # Calculate total exposure
+                                exposures = [f.exptime for f in run_files if f.exptime]
+                                total_exposure = sum(exposures) if exposures else None
+                                
+                                # Get comment from run
+                                comment = getattr(run_obj, '_extracted_comment', None)
+                                if comment is None:
+                                    try:
+                                        comment = run_obj.comment
+                                    except:
+                                        comment = None
+                                
+                                # Prepare MPC log data
+                                from lib.db import get_db_manager
+                                db_manager = get_db_manager()
+                                
+                                mpc_data = {
+                                    'observation_date': observation_date,
+                                    'target_name': target_name,
+                                    'ra_center': ra_center,
+                                    'dec_center': dec_center,
+                                    'num_images': num_images,
+                                    'single_exposure': single_exposure,
+                                    'total_exposure': total_exposure,
+                                    'magnitude': magnitude,
+                                    'motion': motion,
+                                    'status': status,
+                                    'comment': comment
+                                }
+                                
+                                try:
+                                    db_manager.add_mpc_log_entry(mpc_data)
+                                    QMessageBox.information(self, "Success", "Observation added to MPC log successfully.")
+                                except Exception as e:
+                                    QMessageBox.critical(self, "Error", f"Failed to add observation to MPC log:\n{str(e)}")
+                        
                         menu = QMenu(self)
                         edit_comment_action = QAction("Edit comment", menu)
                         edit_comment_action.triggered.connect(edit_comment)
                         menu.addAction(edit_comment_action)
+                        
+                        menu.addSeparator()
+                        
+                        add_mpc_action = QAction("Add to MPC log", menu)
+                        add_mpc_action.triggered.connect(add_to_mpc_log)
+                        menu.addAction(add_mpc_action)
+                        
                         menu.exec(self.viewport().mapToGlobal(pos))
                         return
         
