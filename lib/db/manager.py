@@ -76,6 +76,16 @@ class DatabaseManager:
             # Create mpc_log table using the model definition
             MPCLog.__table__.create(self.engine, checkfirst=True)
             print("Created 'mpc_log' table")
+        
+        # Check if runs.badges column exists
+        if 'runs' in existing_tables:
+            columns = [col['name'] for col in inspector.get_columns('runs')]
+            if 'badges' not in columns:
+                # Add badges column to runs table
+                with self.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE runs ADD COLUMN badges TEXT"))
+                    conn.commit()
+                print("Added 'badges' column to 'runs' table")
     
     def get_session(self) -> Session:
         """Get a new database session.
@@ -792,6 +802,59 @@ class DatabaseManager:
         finally:
             session.close()
     
+    def add_run_badge(self, run_id: int, badge: str) -> bool:
+        """Add a badge to a run.
+        
+        Args:
+            run_id: Run ID
+            badge: Badge name to add (e.g., "mpc")
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if run:
+                current_badges = run.badges or ""
+                badges_list = [b.strip() for b in current_badges.split(",") if b.strip()]
+                if badge not in badges_list:
+                    badges_list.append(badge)
+                    run.badges = ",".join(badges_list)
+                    session.commit()
+                return True
+            return False
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Error adding run badge: {e}")
+            return False
+        finally:
+            session.close()
+    
+    def clear_run_badges(self, run_id: int) -> bool:
+        """Clear all badges from a run.
+        
+        Args:
+            run_id: Run ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if run:
+                run.badges = None
+                session.commit()
+                return True
+            return False
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Error clearing run badges: {e}")
+            return False
+        finally:
+            session.close()
+    
     def assign_files_to_run(self, run_id: int, fits_file_ids: list) -> bool:
         """Assign FITS files to a run.
         
@@ -904,6 +967,30 @@ class DatabaseManager:
             session.rollback()
             print(f"Error adding MPC log entry: {e}")
             raise
+        finally:
+            session.close()
+    
+    def delete_mpc_log_entry(self, mpc_log_id: int) -> bool:
+        """Delete an MPC log entry from the database.
+        
+        Args:
+            mpc_log_id: ID of the MPC log entry to delete
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        session = self.get_session()
+        try:
+            mpc_log = session.query(MPCLog).filter(MPCLog.id == mpc_log_id).first()
+            if mpc_log:
+                session.delete(mpc_log)
+                session.commit()
+                return True
+            return False
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Error deleting MPC log entry: {e}")
+            return False
         finally:
             session.close()
     

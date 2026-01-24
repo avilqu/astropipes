@@ -148,6 +148,18 @@ class RunSummaryWidget(QWidget):
             self.comment_label.setStyleSheet("color: #aaa;")
             layout.addWidget(self.comment_label)
         
+        # Create badges
+        badges = self.run_data.get('badges', [])
+        if badges:
+            for badge in badges:
+                badge_label = QLabel(f" [{badge.upper()}]")
+                badge_label.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+                if badge.lower() == 'mpc':
+                    badge_label.setStyleSheet("color: #dc3545;")  # Red
+                else:
+                    badge_label.setStyleSheet("color: #6c757d;")  # Gray for other badges
+                layout.addWidget(badge_label)
+        
         layout.addStretch()
     
     def set_expanded(self, expanded):
@@ -198,9 +210,9 @@ class FitsTableWidget(QTableWidget):
     
     def init_table(self):
         """Initialize the table structure."""
-        self.setColumnCount(17)
+        self.setColumnCount(15)
         self.setHorizontalHeaderLabels([
-            "Filename", "Date obs", "Target", "Filter", "Exposure", "Bin", "Gain", "Offset", "CCD temp", "Focus", "HFR", "Sources", "Size", "Image Scale", "RA Center", "DEC Center", "WCS Type"
+            "Filename", "Date obs", "Target", "Filter", "Exposure", "Bin", "Gain", "Offset", "CCD temp", "Focus", "Size", "Image Scale", "RA Center", "DEC Center", "WCS Type"
         ])
         
         # Hide row numbers (vertical header)
@@ -234,13 +246,11 @@ class FitsTableWidget(QTableWidget):
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)  # Offset
         header.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive)  # CCD temp
         header.setSectionResizeMode(9, QHeaderView.ResizeMode.Interactive)  # Focus
-        header.setSectionResizeMode(10, QHeaderView.ResizeMode.Interactive)  # HFR
-        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Interactive)  # Sources
-        header.setSectionResizeMode(12, QHeaderView.ResizeMode.Interactive)  # Size
-        header.setSectionResizeMode(13, QHeaderView.ResizeMode.Interactive)  # Image Scale
-        header.setSectionResizeMode(14, QHeaderView.ResizeMode.Interactive)  # RA Center
-        header.setSectionResizeMode(15, QHeaderView.ResizeMode.Interactive)  # DEC Center
-        header.setSectionResizeMode(16, QHeaderView.ResizeMode.Interactive)  # WCS Type
+        header.setSectionResizeMode(10, QHeaderView.ResizeMode.Interactive)  # Size
+        header.setSectionResizeMode(11, QHeaderView.ResizeMode.Interactive)  # Image Scale
+        header.setSectionResizeMode(12, QHeaderView.ResizeMode.Interactive)  # RA Center
+        header.setSectionResizeMode(13, QHeaderView.ResizeMode.Interactive)  # DEC Center
+        header.setSectionResizeMode(14, QHeaderView.ResizeMode.Interactive)  # WCS Type
         
         # Set default column widths
         self.setColumnWidth(0, 200)   # Filename
@@ -252,14 +262,12 @@ class FitsTableWidget(QTableWidget):
         self.setColumnWidth(6, 60)    # Gain
         self.setColumnWidth(7, 60)    # Offset
         self.setColumnWidth(8, 80)    # CCD temp
-        self.setColumnWidth(9, 100)   # Focus
-        self.setColumnWidth(10, 60)   # HFR
-        self.setColumnWidth(11, 60)   # Sources
-        self.setColumnWidth(12, 80)   # Size
-        self.setColumnWidth(13, 80)   # Image Scale
-        self.setColumnWidth(14, 100)  # RA Center
-        self.setColumnWidth(15, 100)  # DEC Center
-        self.setColumnWidth(16, 80)   # WCS Type
+        self.setColumnWidth(9, 60)    # Focus
+        self.setColumnWidth(10, 80)   # Size
+        self.setColumnWidth(11, 80)   # Image Scale
+        self.setColumnWidth(12, 100)  # RA Center
+        self.setColumnWidth(13, 100)  # DEC Center
+        self.setColumnWidth(14, 80)   # WCS Type
         
         # Connect selection change and cell click
         self.itemSelectionChanged.connect(self._on_selection_changed)
@@ -294,6 +302,7 @@ class FitsTableWidget(QTableWidget):
         run_objects = {}
         run_start_times = {}  # Store start_time to avoid detached instance issues
         run_comments = {}  # Store comments to avoid detached instance issues
+        run_badges = {}  # Store badges to avoid detached instance issues
         if runs_by_id:
             from lib.db.models import Run
             session = db_manager.get_session()
@@ -305,6 +314,7 @@ class FitsTableWidget(QTableWidget):
                         run_objects[run_id] = run_obj
                         run_start_times[run_id] = run_obj.start_time
                         run_comments[run_id] = run_obj.comment
+                        run_badges[run_id] = run_obj.badges
             finally:
                 session.close()
         
@@ -343,8 +353,9 @@ class FitsTableWidget(QTableWidget):
         for run_id, run_files in runs_by_id.items():
             run_obj = run_objects.get(run_id)
             if run_obj:
-                # Store extracted comment with the run for later use
+                # Store extracted comment and badges with the run for later use
                 run_obj._extracted_comment = run_comments.get(run_id)
+                run_obj._extracted_badges = run_badges.get(run_id)
                 final_runs.append((run_obj, run_files))
         
         # Create new runs for unassigned groups
@@ -358,12 +369,14 @@ class FitsTableWidget(QTableWidget):
                     file_ids = [f.id for f in run_files if hasattr(f, 'id') and f.id is not None]
                     if file_ids:  # Only create run if we have file IDs
                         run_obj = db_manager.create_or_get_run(target, start_time, end_time, file_ids)
-                        # Extract comment while session might still be open, or it will be None for new runs
+                        # Extract comment and badges while session might still be open, or it will be None for new runs
                         if run_obj:
                             try:
                                 run_obj._extracted_comment = run_obj.comment
+                                run_obj._extracted_badges = run_obj.badges
                             except:
                                 run_obj._extracted_comment = None
+                                run_obj._extracted_badges = None
                         final_runs.append((run_obj, run_files))
         
         # Sort final runs by start_time (most recent first)
@@ -406,6 +419,19 @@ class FitsTableWidget(QTableWidget):
         else:
             date_time_str = "-"
             date_str = "-"
+        
+        # Get badges from run object (use extracted attribute if available)
+        badges = []
+        if run_obj:
+            try:
+                badges_str = getattr(run_obj, '_extracted_badges', None)
+                if badges_str is None:
+                    badges_str = run_obj.badges
+                if badges_str:
+                    badges = [b.strip() for b in badges_str.split(",") if b.strip()]
+            except:
+                pass
+        
         return {
             'count': count,
             'target': target,
@@ -417,7 +443,8 @@ class FitsTableWidget(QTableWidget):
             'date_time_str': date_time_str,
             'files': run_files,
             'run_obj': run_obj,  # Store the Run object
-            'comment': getattr(run_obj, '_extracted_comment', None) if run_obj else None
+            'comment': getattr(run_obj, '_extracted_comment', None) if run_obj else None,
+            'badges': badges
         }
     
     def populate_table(self, fits_files):
@@ -623,24 +650,6 @@ class FitsTableWidget(QTableWidget):
         focus_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setItem(row, 9, focus_item)
         
-        # HFR (Half-Flux Radius)
-        if fits_file.hfr:
-            hfr_str = f"{fits_file.hfr:.2f}"
-        else:
-            hfr_str = "-"
-        hfr_item = QTableWidgetItem(hfr_str)
-        hfr_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 10, hfr_item)
-        
-        # Sources count
-        if fits_file.sources_count:
-            sources_str = str(fits_file.sources_count)
-        else:
-            sources_str = "-"
-        sources_item = QTableWidgetItem(sources_str)
-        sources_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 11, sources_item)
-        
         # Image size (X x Y)
         if fits_file.size_x and fits_file.size_y:
             size_str = f"{fits_file.size_x} × {fits_file.size_y}"
@@ -648,7 +657,7 @@ class FitsTableWidget(QTableWidget):
             size_str = "-"
         size_item = QTableWidgetItem(size_str)
         size_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 12, size_item)
+        self.setItem(row, 10, size_item)
         
         # Image scale
         if fits_file.image_scale:
@@ -657,7 +666,7 @@ class FitsTableWidget(QTableWidget):
             scale_str = "-"
         scale_item = QTableWidgetItem(scale_str)
         scale_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 13, scale_item)
+        self.setItem(row, 11, scale_item)
         
         # RA Center
         if fits_file.ra_center:
@@ -671,7 +680,7 @@ class FitsTableWidget(QTableWidget):
             ra_str = "-"
         ra_item = QTableWidgetItem(ra_str)
         ra_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 14, ra_item)
+        self.setItem(row, 12, ra_item)
         
         # DEC Center
         if fits_file.dec_center:
@@ -687,13 +696,13 @@ class FitsTableWidget(QTableWidget):
             dec_str = "-"
         dec_item = QTableWidgetItem(dec_str)
         dec_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 15, dec_item)
+        self.setItem(row, 13, dec_item)
         
         # WCS Type
         wcs_type = fits_file.wcs_type or "-"
         wcs_item = QTableWidgetItem(wcs_type)
         wcs_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 16, wcs_item)
+        self.setItem(row, 14, wcs_item)
     
     def _on_cell_clicked(self, row, column):
         """Handle cell clicks for expanding/collapsing runs."""
@@ -931,8 +940,16 @@ class FitsTableWidget(QTableWidget):
                             # Get target name from run data
                             target_name = run_data.get('target', 'Unknown')
                             
+                            # Get current comment from run
+                            initial_comment = getattr(run_obj, '_extracted_comment', None)
+                            if initial_comment is None:
+                                try:
+                                    initial_comment = run_obj.comment
+                                except:
+                                    initial_comment = None
+                            
                             # Open MPC log dialog
-                            dialog = MPCLogDialog(self, target_name=target_name)
+                            dialog = MPCLogDialog(self, target_name=target_name, initial_comment=initial_comment)
                             if dialog.exec() == QDialog.DialogCode.Accepted:
                                 # Validate input (validate before processing)
                                 valid, error_msg = dialog.validate()
@@ -944,6 +961,21 @@ class FitsTableWidget(QTableWidget):
                                 motion = dialog.get_motion()
                                 magnitude = dialog.get_magnitude()
                                 status = dialog.get_status()
+                                comment = dialog.get_comment()
+                                
+                                # Get db_manager
+                                from lib.db import get_db_manager
+                                db_manager = get_db_manager()
+                                
+                                # Update run comment if provided
+                                run_id = getattr(run_obj, 'id', None)
+                                if run_id is None:
+                                    try:
+                                        run_id = run_obj.id
+                                    except:
+                                        pass
+                                if run_id:
+                                    db_manager.update_run_comment(run_id, comment)
                                 
                                 # Get run data
                                 # Observation date is start of observation (oldest file)
@@ -968,17 +1000,18 @@ class FitsTableWidget(QTableWidget):
                                 exposures = [f.exptime for f in run_files if f.exptime]
                                 total_exposure = sum(exposures) if exposures else None
                                 
-                                # Get comment from run
-                                comment = getattr(run_obj, '_extracted_comment', None)
-                                if comment is None:
-                                    try:
-                                        comment = run_obj.comment
-                                    except:
+                                # Get comment from run (now updated with dialog value)
+                                # Re-fetch the run to get the updated comment
+                                if run_id:
+                                    updated_run = db_manager.get_run_by_id(run_id)
+                                    if updated_run:
+                                        comment = updated_run.comment
+                                    else:
                                         comment = None
+                                else:
+                                    comment = None
                                 
                                 # Prepare MPC log data
-                                from lib.db import get_db_manager
-                                db_manager = get_db_manager()
                                 
                                 mpc_data = {
                                     'observation_date': observation_date,
@@ -996,9 +1029,35 @@ class FitsTableWidget(QTableWidget):
                                 
                                 try:
                                     db_manager.add_mpc_log_entry(mpc_data)
+                                    # Add MPC badge to the run
+                                    if run_id:
+                                        db_manager.add_run_badge(run_id, "mpc")
                                     QMessageBox.information(self, "Success", "Observation added to MPC log successfully.")
+                                    # Refresh the table to show the badge
+                                    self.refresh_table()
+                                    self.database_refresh_requested.emit()
                                 except Exception as e:
                                     QMessageBox.critical(self, "Error", f"Failed to add observation to MPC log:\n{str(e)}")
+                        
+                        def clear_badges():
+                            """Clear all badges from the run."""
+                            run_id = getattr(run_obj, 'id', None)
+                            if run_id is None:
+                                try:
+                                    run_id = run_obj.id
+                                except:
+                                    QMessageBox.warning(self, "Error", "Could not get run ID.")
+                                    return
+                            
+                            from lib.db import get_db_manager
+                            db_manager = get_db_manager()
+                            if db_manager.clear_run_badges(run_id):
+                                QMessageBox.information(self, "Success", "Badges cleared successfully.")
+                                # Refresh the table
+                                self.refresh_table()
+                                self.database_refresh_requested.emit()
+                            else:
+                                QMessageBox.warning(self, "Error", "Failed to clear badges.")
                         
                         menu = QMenu(self)
                         edit_comment_action = QAction("Edit comment", menu)
@@ -1010,6 +1069,12 @@ class FitsTableWidget(QTableWidget):
                         add_mpc_action = QAction("Add to MPC log", menu)
                         add_mpc_action.triggered.connect(add_to_mpc_log)
                         menu.addAction(add_mpc_action)
+                        
+                        menu.addSeparator()
+                        
+                        clear_badges_action = QAction("Clear Badges", menu)
+                        clear_badges_action.triggered.connect(clear_badges)
+                        menu.addAction(clear_badges_action)
                         
                         menu.exec(self.viewport().mapToGlobal(pos))
                         return

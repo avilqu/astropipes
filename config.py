@@ -18,9 +18,9 @@ def to_display_time(dt_utc):
 # astro-pipelines will write calibration masters
 # (and expect them to stay) in CALIBRATION_PATH.
 CALIBRATION_PATH = '/home/tan/Astro/calibration'
-DATA_PATH = '/home/tan/Astro/obs'
-ARCHIVE_PATH = '/home/tan/Astro/data'
-PROCESSED_PATH = '/home/tan/Astro/_astropipes'
+DATA_PATH = '/home/tan/Astro/data'
+ARCHIVE_PATH = '/home/tan/Astro/archive'
+PROCESSED_PATH = '/home/tan/.astropipes'
 
 OBS_CODE = 'R56'
 OBS_LON = 170.483
@@ -136,7 +136,7 @@ TESTED_FITS_CARDS = [
 ]
 
 # --- User Settings ---
-TIME_DISPLAY_MODE = 'UTC'
+TIME_DISPLAY_MODE = 'Local'
 BLINK_PERIOD_MS = 1000
 
 MPCQ_DATASET_ID = 'astropipes-467001.asteroid_institute_mpc_replica'

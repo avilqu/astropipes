@@ -142,6 +142,9 @@ class Run(Base):
     # User-defined comment
     comment = Column(Text, nullable=True)
     
+    # Badges (comma-separated list, e.g., "mpc,other")
+    badges = Column(Text, nullable=True)
+    
     # Relationships
     # Note: cascade is NOT set to delete-orphan - we want to keep runs even if files are deleted
     # Run cleanup is handled by DatabaseManager methods

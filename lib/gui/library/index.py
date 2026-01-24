@@ -457,6 +457,7 @@ class AstroLibraryGUI(QMainWindow):
         # Refresh MPC log table when database is refreshed
         self.table_widget.database_refresh_requested.connect(self.refresh_mpc_log_table)
         self.main_table_widget.database_refresh_requested.connect(self.refresh_mpc_log_table)
+        self.mpc_log_table.database_refresh_requested.connect(self.refresh_mpc_log_table)
         # Menu selection
         self.left_panel.menu_selection_changed.connect(self.on_menu_selection_changed)
         self.left_panel.target_renamed.connect(lambda old, new: self.load_database())
