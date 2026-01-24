@@ -48,8 +48,12 @@ class FitsFile(Base):
     hfr = Column(Float)  # Half-Flux Radius (populated after source analysis)
     sources_count = Column(Integer)  # Number of detected sources (populated after source analysis)
     
+    # Run association
+    run_id = Column(Integer, ForeignKey('runs.id'), nullable=True)
+    
     # Relationships
     sources = relationship("Source", back_populates="fits_file", cascade="all, delete-orphan")
+    run = relationship("Run", back_populates="fits_files")
     
     def __repr__(self):
         return f"<FitsFile(id={self.id}, path='{self.path}', target='{self.target}')>"
@@ -121,4 +125,27 @@ class CalibrationMaster(Base):
     integration_count = Column(Integer)
 
     def __repr__(self):
-        return f"<CalibrationMaster(id={self.id}, path='{self.path}', frame='{self.frame}', date='{self.date}')>" 
+        return f"<CalibrationMaster(id={self.id}, path='{self.path}', frame='{self.frame}', date='{self.date}')>"
+
+class Run(Base):
+    """Model representing a run - a set of shots of the same target taken around the same time."""
+    __tablename__ = 'runs'
+    
+    # Primary key
+    id = Column(Integer, primary_key=True)
+    
+    # Run information
+    target = Column(String, nullable=False)
+    start_time = Column(DateTime, nullable=False)  # Earliest file in the run
+    end_time = Column(DateTime, nullable=False)    # Latest file in the run
+    
+    # User-defined comment
+    comment = Column(Text, nullable=True)
+    
+    # Relationships
+    # Note: cascade is NOT set to delete-orphan - we want to keep runs even if files are deleted
+    # Run cleanup is handled by DatabaseManager methods
+    fits_files = relationship("FitsFile", back_populates="run")
+    
+    def __repr__(self):
+        return f"<Run(id={self.id}, target='{self.target}', start_time='{self.start_time}', end_time='{self.end_time}')>" 

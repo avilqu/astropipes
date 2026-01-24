@@ -3,7 +3,7 @@ import os
 import shutil
 from pathlib import Path
 from lib.db.manager import get_db_manager
-from lib.db.models import FitsFile
+from lib.db.models import FitsFile, Run
 from lib.fits import set_fits_header_value
 from lib.db.scan import normalize_object_name, rescan_single_file
 from sqlalchemy.orm import Session
@@ -86,6 +86,9 @@ def rename_target_across_database(old_target: str, new_target: str, commit: bool
         # Get all files for this target before updating paths
         files = session.query(FitsFile).filter(FitsFile.target == old_norm).all()
         
+        # Collect run IDs that will need maintenance after target change
+        runs_to_maintain = set()
+        
         # Update file paths in the database to reflect the new folder name
         for fits_file in files:
             try:
@@ -102,8 +105,15 @@ def rename_target_across_database(old_target: str, new_target: str, commit: bool
                 
                 fits_file.path = str(new_path)
                 
+                # Store old run_id for run maintenance
+                if fits_file.run_id:
+                    runs_to_maintain.add(fits_file.run_id)
+                
                 # Update the target field
                 fits_file.target = new_norm
+                
+                # Remove from old run (target changed, so file doesn't belong to that run anymore)
+                fits_file.run_id = None
                 
                 if commit:
                     session.commit()
@@ -119,6 +129,33 @@ def rename_target_across_database(old_target: str, new_target: str, commit: bool
             except Exception as e:
                 session.rollback()
                 results['errors'].append({'path': fits_file.path, 'error': str(e)})
+        
+        # Maintain runs that had files removed (update times or delete if empty)
+        # Use a helper function to maintain runs
+        from sqlalchemy import func
+        for run_id in runs_to_maintain:
+            # Check if run still has files
+            file_count = session.query(func.count(FitsFile.id)).filter(
+                FitsFile.run_id == run_id
+            ).scalar()
+            
+            if file_count == 0:
+                # Run is empty, delete it
+                run = session.query(Run).filter(Run.id == run_id).first()
+                if run:
+                    session.delete(run)
+            else:
+                # Update run times based on remaining files
+                result = session.query(
+                    func.min(FitsFile.date_obs),
+                    func.max(FitsFile.date_obs)
+                ).filter(FitsFile.run_id == run_id).first()
+                
+                if result and result[0] and result[1]:
+                    run = session.query(Run).filter(Run.id == run_id).first()
+                    if run:
+                        run.start_time = result[0]
+                        run.end_time = result[1]
         
         if commit:
             session.commit()

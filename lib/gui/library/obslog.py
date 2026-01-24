@@ -8,10 +8,10 @@ import os
 import subprocess
 from datetime import datetime
 from PyQt6.QtWidgets import (
-    QTableWidget, QTableWidgetItem, QHeaderView, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QMenu, QMessageBox, QFrame
+    QTableWidget, QTableWidgetItem, QHeaderView, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QMenu, QMessageBox, QFrame, QDialog, QTextEdit, QPushButton
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QItemSelectionModel, QThread, pyqtSignal as Signal
-from PyQt6.QtGui import QFont, QPalette, QColor
+from PyQt6.QtGui import QFont, QPalette, QColor, QAction
 from .context_dropdown import build_single_file_menu, build_multi_file_menu, build_empty_menu, calibrate_and_compare_file, delete_files_with_confirmation
 import json
 from astropy.io import fits
@@ -29,6 +29,51 @@ import signal
 from .platesolving_thread import PlatesolvingThread
 from config import to_display_time
 from astropipes import VIEWER_PATH
+
+
+class RunCommentDialog(QDialog):
+    """Dialog for editing run comments."""
+    
+    def __init__(self, parent=None, initial_comment=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Run Comment")
+        self.setModal(True)
+        self.setFixedSize(500, 200)
+        
+        layout = QVBoxLayout(self)
+        
+        # Label
+        label = QLabel("Comment:")
+        layout.addWidget(label)
+        
+        # Text edit for comment
+        self.comment_edit = QTextEdit()
+        self.comment_edit.setPlaceholderText("Enter a comment for this run...")
+        if initial_comment:
+            self.comment_edit.setPlainText(initial_comment)
+        layout.addWidget(self.comment_edit)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.save_button = QPushButton("Save")
+        self.save_button.clicked.connect(self.accept)
+        button_layout.addWidget(self.save_button)
+        
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+        # Set focus to text edit
+        self.comment_edit.setFocus()
+    
+    def get_comment(self):
+        """Get the comment text."""
+        text = self.comment_edit.toPlainText().strip()
+        return text if text else None
 
 
 def launch_viewer(fits_paths):
@@ -112,6 +157,7 @@ class RunSummaryWidget(QWidget):
         exposures = self.run_data['exposures']
         total_minutes = self.run_data['total_minutes']
         binning = self.run_data['binning']
+        comment = self.run_data.get('comment')
         
         # Format filters
         filter_str = ", ".join(sorted(set(filters))) if filters else "-"
@@ -119,8 +165,14 @@ class RunSummaryWidget(QWidget):
         # Format exposures
         exposure_str = ", ".join([f"{exp:.1f}s" for exp in sorted(set(exposures))]) if exposures else "-"
         
-        # Show date and time at the start
-        return f"{date_time_str} / {target} / {count} files / {binning} / {filter_str} / {exposure_str} / Total: {total_minutes}mn"
+        # Build base summary
+        summary = f"{date_time_str} / {target} / {count} files / {binning} / {filter_str} / {exposure_str} / Total: {total_minutes}mn"
+        
+        # Add comment if present
+        if comment:
+            summary += f" | Comment: {comment}"
+        
+        return summary
 
 
 class FitsTableWidget(QTableWidget):
@@ -208,17 +260,53 @@ class FitsTableWidget(QTableWidget):
         self.cellClicked.connect(self._on_cell_clicked)
     
     def _group_files_by_runs(self, fits_files):
-        """Group FITS files by runs based on target and time proximity."""
+        """Group FITS files by runs based on stored run_id or target and time proximity."""
         if not fits_files:
             return []
+        
+        from lib.db import get_db_manager
+        db_manager = get_db_manager()
         
         # Sort files by date_obs (most recent first)
         sorted_files = sorted(fits_files, key=lambda x: x.date_obs or datetime.min, reverse=True)
         
+        # First, group files that already belong to runs
+        runs_by_id = {}
+        unassigned_files = []
+        
+        for file in sorted_files:
+            # Check if file has a run_id (it's a column, so it always exists, but may be None)
+            run_id = getattr(file, 'run_id', None)
+            if run_id:
+                if run_id not in runs_by_id:
+                    runs_by_id[run_id] = []
+                runs_by_id[run_id].append(file)
+            else:
+                unassigned_files.append(file)
+        
+        # Get run objects for existing runs and extract needed attributes
+        run_objects = {}
+        run_start_times = {}  # Store start_time to avoid detached instance issues
+        run_comments = {}  # Store comments to avoid detached instance issues
+        if runs_by_id:
+            from lib.db.models import Run
+            session = db_manager.get_session()
+            try:
+                for run_id in runs_by_id.keys():
+                    run_obj = session.query(Run).filter(Run.id == run_id).first()
+                    if run_obj:
+                        # Extract attributes while session is open
+                        run_objects[run_id] = run_obj
+                        run_start_times[run_id] = run_obj.start_time
+                        run_comments[run_id] = run_obj.comment
+            finally:
+                session.close()
+        
+        # Group unassigned files by target and time proximity
         runs = []
         current_run = []
         
-        for file in sorted_files:
+        for file in unassigned_files:
             if not current_run:
                 current_run = [file]
             else:
@@ -235,16 +323,62 @@ class FitsTableWidget(QTableWidget):
                 else:
                     # End current run and start new one
                     if current_run:
-                        runs.append(current_run)
+                        runs.append((None, current_run))  # None means no run_id yet
                     current_run = [file]
         
         # Add the last run
         if current_run:
-            runs.append(current_run)
+            runs.append((None, current_run))
         
-        return runs
+        # Create runs in database for unassigned groups and get run objects
+        final_runs = []
+        
+        # Add existing runs (with run_id)
+        for run_id, run_files in runs_by_id.items():
+            run_obj = run_objects.get(run_id)
+            if run_obj:
+                # Store extracted comment with the run for later use
+                run_obj._extracted_comment = run_comments.get(run_id)
+                final_runs.append((run_obj, run_files))
+        
+        # Create new runs for unassigned groups
+        for run_id, run_files in runs:
+            if run_files:
+                target = run_files[0].target if run_files else "Unknown"
+                dates = [f.date_obs for f in run_files if f.date_obs]
+                if dates:
+                    start_time = min(dates)
+                    end_time = max(dates)
+                    file_ids = [f.id for f in run_files if hasattr(f, 'id') and f.id is not None]
+                    if file_ids:  # Only create run if we have file IDs
+                        run_obj = db_manager.create_or_get_run(target, start_time, end_time, file_ids)
+                        # Extract comment while session might still be open, or it will be None for new runs
+                        if run_obj:
+                            try:
+                                run_obj._extracted_comment = run_obj.comment
+                            except:
+                                run_obj._extracted_comment = None
+                        final_runs.append((run_obj, run_files))
+        
+        # Sort final runs by start_time (most recent first)
+        # Use file dates to avoid detached instance issues
+        def get_start_time(run_tuple):
+            run_obj, files = run_tuple
+            # Use file dates to determine start_time (avoids detached instance issues)
+            dates = [f.date_obs for f in files if f.date_obs]
+            if dates:
+                return min(dates)
+            # Fallback to stored start_time for existing runs if available
+            if run_obj and run_obj.id in run_start_times:
+                return run_start_times[run_obj.id]
+            return datetime.min
+        
+        final_runs.sort(key=get_start_time, reverse=True)
+        
+        # Return just the file lists (run objects are stored in run_data)
+        return [(run_obj, files) for run_obj, files in final_runs]
     
-    def _create_run_summary_data(self, run_files):
+    def _create_run_summary_data(self, run_obj, run_files):
         """Create summary data for a run."""
         count = len(run_files)
         target = run_files[0].target if run_files else "Unknown"
@@ -275,7 +409,9 @@ class FitsTableWidget(QTableWidget):
             'binning': binning,
             'date_str': date_str,
             'date_time_str': date_time_str,
-            'files': run_files
+            'files': run_files,
+            'run_obj': run_obj,  # Store the Run object
+            'comment': getattr(run_obj, '_extracted_comment', None) if run_obj else None
         }
     
     def populate_table(self, fits_files):
@@ -294,22 +430,22 @@ class FitsTableWidget(QTableWidget):
         self.verticalHeader().setDefaultSectionSize(60)  # Double height
         
         # Populate each run as a summary row
-        for row, run_files in enumerate(self.run_groups):
-            self._add_run_summary_row(row, run_files)
+        for row, (run_obj, run_files) in enumerate(self.run_groups):
+            self._add_run_summary_row(row, run_obj, run_files)
         self._apply_striping()
         
         # Collapse all runs by default, expand only the most recent (first) run
         if self.run_groups:
             self._expand_run(0)
 
-    def _add_run_summary_row(self, row, run_files):
+    def _add_run_summary_row(self, row, run_obj, run_files):
         """Add a run summary row to the table."""
         # Set double row height for run summary rows
         self.verticalHeader().setSectionResizeMode(row, QHeaderView.ResizeMode.Fixed)
         self.setRowHeight(row, 60)  # Double height
         
         # Create run summary data
-        run_data = self._create_run_summary_data(run_files)
+        run_data = self._create_run_summary_data(run_obj, run_files)
         
         # Create custom widget for the summary
         summary_widget = RunSummaryWidget(run_data)
@@ -328,6 +464,7 @@ class FitsTableWidget(QTableWidget):
             hidden_item.setData(Qt.ItemDataRole.UserRole, {
                 'run_files': run_files,
                 'run_data': run_data,
+                'run_obj': run_obj,
                 'is_run_summary': True,
                 'run_index': row
             })
@@ -736,6 +873,53 @@ class FitsTableWidget(QTableWidget):
 
     def _show_context_menu(self, pos):
         """Show a context menu depending on the selection."""
+        # Check if right-clicking on a run summary row
+        item = self.itemAt(pos)
+        if item:
+            row = item.row()
+            row_item = self.item(row, 0)
+            if row_item:
+                data = row_item.data(Qt.ItemDataRole.UserRole)
+                if data and 'is_run_summary' in data and 'run_obj' in data:
+                    # Right-clicked on a run summary row
+                    run_obj = data.get('run_obj')
+                    if run_obj:
+                        def edit_comment():
+                            # Get comment from extracted attribute or try to access it
+                            initial_comment = getattr(run_obj, '_extracted_comment', None)
+                            if initial_comment is None:
+                                try:
+                                    initial_comment = run_obj.comment
+                                except:
+                                    initial_comment = None
+                            
+                            dialog = RunCommentDialog(self, initial_comment=initial_comment)
+                            if dialog.exec() == QDialog.DialogCode.Accepted:
+                                new_comment = dialog.get_comment()
+                                from lib.db import get_db_manager
+                                db_manager = get_db_manager()
+                                # Get run_id - use id attribute or try to access it
+                                run_id = getattr(run_obj, 'id', None)
+                                if run_id is None:
+                                    try:
+                                        run_id = run_obj.id
+                                    except:
+                                        # Can't get run_id, skip
+                                        return
+                                
+                                if db_manager.update_run_comment(run_id, new_comment):
+                                    # Refresh the table to show updated comment
+                                    self.refresh_table()
+                                    # Emit signal to refresh database
+                                    self.database_refresh_requested.emit()
+                        
+                        menu = QMenu(self)
+                        edit_comment_action = QAction("Edit comment", menu)
+                        edit_comment_action.triggered.connect(edit_comment)
+                        menu.addAction(edit_comment_action)
+                        menu.exec(self.viewport().mapToGlobal(pos))
+                        return
+        
         selected_files = self.get_selected_fits_files()
         if len(selected_files) == 1:
             def show_header():

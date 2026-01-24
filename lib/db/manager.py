@@ -3,7 +3,7 @@ import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
-from .models import Base, FitsFile, Source, CalibrationMaster
+from .models import Base, FitsFile, Source, CalibrationMaster, Run
 from config import to_display_time
 
 class DatabaseManager:
@@ -34,6 +34,9 @@ class DatabaseManager:
             # Create all tables
             Base.metadata.create_all(self.engine)
             
+            # Run migrations for existing databases
+            self._migrate_database()
+            
             # Create session factory
             self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
             
@@ -42,6 +45,31 @@ class DatabaseManager:
         except SQLAlchemyError as e:
             print(f"Error initializing database: {e}")
             raise
+    
+    def _migrate_database(self):
+        """Migrate existing database schema to add new columns and tables."""
+        from sqlalchemy import inspect, text
+        
+        inspector = inspect(self.engine)
+        existing_tables = inspector.get_table_names()
+        
+        # Check if runs table exists
+        if 'runs' not in existing_tables:
+            # Create runs table using the model definition
+            Run.__table__.create(self.engine, checkfirst=True)
+            print("Created 'runs' table")
+        
+        # Check if fits_files.run_id column exists
+        if 'fits_files' in existing_tables:
+            columns = [col['name'] for col in inspector.get_columns('fits_files')]
+            if 'run_id' not in columns:
+                # Add run_id column to fits_files table
+                # Note: SQLite doesn't support adding foreign key constraints via ALTER TABLE,
+                # but the column will work for our purposes. The relationship is handled by SQLAlchemy.
+                with self.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE fits_files ADD COLUMN run_id INTEGER"))
+                    conn.commit()
+                print("Added 'run_id' column to 'fits_files' table")
     
     def get_session(self) -> Session:
         """Get a new database session.
@@ -106,6 +134,7 @@ class DatabaseManager:
     
     def update_fits_file(self, fits_file_id: int, update_data: dict) -> bool:
         """Update an existing FITS file.
+        Automatically maintains runs if target or date_obs changes.
         
         Args:
             fits_file_id: ID of the FITS file to update
@@ -118,10 +147,35 @@ class DatabaseManager:
         try:
             fits_file = session.query(FitsFile).filter(FitsFile.id == fits_file_id).first()
             if fits_file:
+                # Store old values for run maintenance
+                old_run_id = fits_file.run_id
+                old_target = fits_file.target
+                old_date_obs = fits_file.date_obs
+                
+                # Update fields
                 for key, value in update_data.items():
                     if hasattr(fits_file, key):
                         setattr(fits_file, key, value)
+                
                 session.commit()
+                
+                # Maintain runs if target or date_obs changed
+                new_target = fits_file.target
+                new_date_obs = fits_file.date_obs
+                
+                # If target changed, remove from old run
+                if old_target and new_target and old_target != new_target:
+                    if old_run_id:
+                        fits_file.run_id = None
+                        session.commit()
+                        self._maintain_run_after_file_removal(session, old_run_id)
+                        session.commit()
+                
+                # If date_obs changed, update run times
+                elif old_run_id and old_date_obs and new_date_obs and old_date_obs != new_date_obs:
+                    self._update_run_times(session, old_run_id)
+                    session.commit()
+                
                 return True
             return False
         except SQLAlchemyError as e:
@@ -133,6 +187,7 @@ class DatabaseManager:
     
     def delete_fits_file(self, fits_file_id: int) -> bool:
         """Delete a FITS file and its associated sources.
+        Automatically maintains runs (updates times or deletes empty runs).
         
         Args:
             fits_file_id: ID of the FITS file to delete
@@ -144,8 +199,17 @@ class DatabaseManager:
         try:
             fits_file = session.query(FitsFile).filter(FitsFile.id == fits_file_id).first()
             if fits_file:
+                # Store run_id before deletion for cleanup
+                run_id = fits_file.run_id
+                
                 session.delete(fits_file)
                 session.commit()
+                
+                # Maintain the run after file deletion
+                if run_id:
+                    self._maintain_run_after_file_removal(session, run_id)
+                    session.commit()
+                
                 return True
             return False
         except SQLAlchemyError as e:
@@ -607,6 +671,201 @@ class DatabaseManager:
             session.close()
         
         return results
+    
+    def create_or_get_run(self, target: str, start_time, end_time, fits_file_ids: list = None) -> Run:
+        """Create a new run or get existing run if files already belong to one.
+        
+        Args:
+            target: Target name
+            start_time: Start time (datetime)
+            end_time: End time (datetime)
+            fits_file_ids: Optional list of FITS file IDs to associate with the run
+            
+        Returns:
+            Run object
+        """
+        session = self.get_session()
+        try:
+            # Check if any of the files already belong to a run
+            if fits_file_ids:
+                existing_run = session.query(Run).join(FitsFile).filter(
+                    FitsFile.id.in_(fits_file_ids)
+                ).first()
+                if existing_run:
+                    # Update times if needed
+                    if start_time < existing_run.start_time:
+                        existing_run.start_time = start_time
+                    if end_time > existing_run.end_time:
+                        existing_run.end_time = end_time
+                    session.commit()
+                    session.refresh(existing_run)
+                    return existing_run
+            
+            # Create new run
+            run = Run(
+                target=target,
+                start_time=start_time,
+                end_time=end_time
+            )
+            session.add(run)
+            session.commit()
+            session.refresh(run)
+            
+            # Associate files with the run
+            if fits_file_ids:
+                for file_id in fits_file_ids:
+                    fits_file = session.query(FitsFile).filter(FitsFile.id == file_id).first()
+                    if fits_file:
+                        fits_file.run_id = run.id
+                session.commit()
+            
+            return run
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Error creating/getting run: {e}")
+            raise
+        finally:
+            session.close()
+    
+    def get_run_by_id(self, run_id: int) -> Run:
+        """Get a run by its ID.
+        
+        Args:
+            run_id: Run ID
+            
+        Returns:
+            Run object if found, None otherwise
+        """
+        session = self.get_session()
+        try:
+            return session.query(Run).filter(Run.id == run_id).first()
+        finally:
+            session.close()
+    
+    def get_runs_for_files(self, fits_file_ids: list) -> dict:
+        """Get run information for a list of FITS file IDs.
+        
+        Args:
+            fits_file_ids: List of FITS file IDs
+            
+        Returns:
+            Dictionary mapping file_id -> Run object (or None)
+        """
+        session = self.get_session()
+        try:
+            files = session.query(FitsFile).filter(FitsFile.id.in_(fits_file_ids)).all()
+            result = {}
+            for file in files:
+                result[file.id] = file.run
+            return result
+        finally:
+            session.close()
+    
+    def update_run_comment(self, run_id: int, comment: str) -> bool:
+        """Update the comment for a run.
+        
+        Args:
+            run_id: Run ID
+            comment: Comment text (can be None to clear)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if run:
+                run.comment = comment
+                session.commit()
+                return True
+            return False
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Error updating run comment: {e}")
+            return False
+        finally:
+            session.close()
+    
+    def assign_files_to_run(self, run_id: int, fits_file_ids: list) -> bool:
+        """Assign FITS files to a run.
+        
+        Args:
+            run_id: Run ID
+            fits_file_ids: List of FITS file IDs to assign
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        session = self.get_session()
+        try:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if not run:
+                return False
+            
+            for file_id in fits_file_ids:
+                fits_file = session.query(FitsFile).filter(FitsFile.id == file_id).first()
+                if fits_file:
+                    fits_file.run_id = run.id
+                    # Update run times if needed
+                    if fits_file.date_obs:
+                        if fits_file.date_obs < run.start_time:
+                            run.start_time = fits_file.date_obs
+                        if fits_file.date_obs > run.end_time:
+                            run.end_time = fits_file.date_obs
+            
+            session.commit()
+            return True
+        except SQLAlchemyError as e:
+            session.rollback()
+            print(f"Error assigning files to run: {e}")
+            return False
+        finally:
+            session.close()
+    
+    def _maintain_run_after_file_removal(self, session, run_id: int):
+        """Maintain a run after a file is removed from it.
+        Updates run times or deletes the run if it's empty.
+        
+        Args:
+            session: Database session
+            run_id: ID of the run to maintain
+        """
+        from sqlalchemy import func
+        
+        # Check if run still has files
+        file_count = session.query(func.count(FitsFile.id)).filter(
+            FitsFile.run_id == run_id
+        ).scalar()
+        
+        if file_count == 0:
+            # Run is empty, delete it
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if run:
+                session.delete(run)
+        else:
+            # Update run times based on remaining files
+            self._update_run_times(session, run_id)
+    
+    def _update_run_times(self, session, run_id: int):
+        """Update start_time and end_time for a run based on its files.
+        
+        Args:
+            session: Database session
+            run_id: ID of the run to update
+        """
+        from sqlalchemy import func
+        
+        # Get min and max date_obs from files in this run
+        result = session.query(
+            func.min(FitsFile.date_obs),
+            func.max(FitsFile.date_obs)
+        ).filter(FitsFile.run_id == run_id).first()
+        
+        if result and result[0] and result[1]:
+            run = session.query(Run).filter(Run.id == run_id).first()
+            if run:
+                run.start_time = result[0]
+                run.end_time = result[1]
     
     def close(self):
         """Close the database connection."""
