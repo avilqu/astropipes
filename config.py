@@ -136,7 +136,7 @@ TESTED_FITS_CARDS = [
 ]
 
 # --- User Settings ---
-TIME_DISPLAY_MODE = 'Local'
+TIME_DISPLAY_MODE = 'UTC'
 BLINK_PERIOD_MS = 1000
 
 MPCQ_DATASET_ID = 'astropipes-467001.asteroid_institute_mpc_replica'

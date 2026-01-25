@@ -3,7 +3,9 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont, QBrush, QColor
 from lib.db import get_db_manager
 from lib.db.edit import rename_target_across_database
-from lib.gui.library.context_dropdown import build_sidebar_target_menu
+from lib.gui.library.context_dropdown import build_sidebar_target_menu, build_sidebar_date_menu
+from lib.gui.library.main_table import launch_viewer
+from lib.gui.library.daily_stacks_thread import DailyStacksGenerationThread
 from lib.gui.library.mpc_log_dialog import MPCLogDialog
 from datetime import datetime
 from lib.gui.library.masters_generation_thread import MastersGenerationThread
@@ -352,6 +354,146 @@ class LeftPanel(QWidget):
                     except Exception as e:
                         QMessageBox.critical(self, "Error", f"Failed to add observation to MPC log:\n{str(e)}")
             
+            def load_all_files_in_viewer():
+                """Load all files for this target in FITS Viewer."""
+                db = get_db_manager()
+                files = db.get_files_by_target(target_name)
+                
+                if not files:
+                    QMessageBox.warning(self, "No Files", f"No files found for target '{target_name}'.")
+                    return
+                
+                # Sort files by date_obs (oldest first)
+                sorted_files = sorted(files, key=lambda f: f.date_obs if f.date_obs else datetime.min)
+                
+                # Get file paths in chronological order
+                file_paths = [f.path for f in sorted_files if f.path]
+                
+                if not file_paths:
+                    QMessageBox.warning(self, "No Files", f"No valid file paths found for target '{target_name}'.")
+                    return
+                
+                # Launch viewer with all files in chronological order
+                launch_viewer(file_paths)
+            
+            def generate_daily_stacks():
+                """Generate daily stacks for the target: group by session, calibrate, align, integrate."""
+                try:
+                    db = get_db_manager()
+                    files = db.get_files_by_target(target_name)
+                    
+                    if not files:
+                        QMessageBox.warning(self, "No Files", f"No files found for target '{target_name}'.")
+                        return
+                    
+                    # Get unique filters from files
+                    filters = set()
+                    for file in files:
+                        filter_name = file.filter_name
+                        if filter_name:
+                            filters.add(filter_name)
+                        else:
+                            filters.add("Unknown")
+                    
+                    filters = sorted(list(filters))
+                    
+                    # If multiple filters, prompt user to select one
+                    selected_filter = None
+                    if len(filters) > 1:
+                        filter_name, ok = QInputDialog.getItem(
+                            self,
+                            "Select Filter",
+                            f"Multiple filters found for target '{target_name}'. Select filter to use:",
+                            filters,
+                            0,  # Default to first filter
+                            False  # Not editable
+                        )
+                        if not ok:
+                            return  # User cancelled
+                        selected_filter = filter_name
+                    elif len(filters) == 1:
+                        selected_filter = filters[0]
+                    else:
+                        QMessageBox.warning(self, "No Filters", f"No filter information found in files for target '{target_name}'.")
+                        return
+                    
+                    # Filter files to only include those from the selected filter
+                    if selected_filter == "Unknown":
+                        filtered_files = [f for f in files if not f.filter_name]
+                    else:
+                        filtered_files = [f for f in files if f.filter_name == selected_filter]
+                    
+                    if not filtered_files:
+                        QMessageBox.warning(self, "No Files", f"No files found for target '{target_name}' with filter '{selected_filter}'.")
+                        return
+                    
+                    # Show console window
+                    console_window = ConsoleOutputWindow(f"Generating Daily Stacks: {target_name} ({selected_filter})", self)
+                    console_window.show_and_raise()
+                    
+                    # Ensure threads are kept alive
+                    if not hasattr(self, '_daily_stacks_threads'):
+                        self._daily_stacks_threads = []
+                    
+                    # Create daily stacks generation thread with filtered files
+                    thread = DailyStacksGenerationThread(target_name, filtered_files, selected_filter)
+                    self._daily_stacks_threads.append(thread)
+                    
+                    def on_output(text):
+                        console_window.append_text(text)
+                    
+                    def on_finished(result):
+                        # Remove thread from list
+                        if thread in self._daily_stacks_threads:
+                            self._daily_stacks_threads.remove(thread)
+                        
+                        if result.get('error'):
+                            if result.get('single_session'):
+                                # Special case: only one session - show info message instead of error
+                                QMessageBox.information(
+                                    self,
+                                    "Single Session",
+                                    f"Only one session found for target '{target_name}'.\n\n"
+                                    "Daily stacks generation requires multiple sessions (images taken on different nights)."
+                                )
+                            else:
+                                console_window.append_text(f"\n{result['error']}\n")
+                            return
+                        
+                        if result.get('success'):
+                            console_window.append_text(f"\n✓ Daily stacks generation completed successfully!\n")
+                            console_window.append_text(f"Sessions processed: {result.get('sessions_processed', 0)}\n")
+                            console_window.append_text(f"Stacks generated: {result.get('stacks_generated', 0)}\n")
+                            
+                            # Load all stacks in FITS Viewer
+                            stack_paths = result.get('stack_paths', [])
+                            if stack_paths:
+                                console_window.append_text(f"\nLoading {len(stack_paths)} stack(s) in FITS Viewer...\n")
+                                try:
+                                    launch_viewer(stack_paths)
+                                    console_window.append_text(f"✓ Stacks loaded in FITS Viewer\n")
+                                except Exception as e:
+                                    console_window.append_text(f"✗ Error loading stacks in viewer: {e}\n")
+                        else:
+                            console_window.append_text(f"\n✗ Daily stacks generation failed\n")
+                    
+                    # Connect signals
+                    thread.output.connect(on_output)
+                    thread.finished.connect(on_finished)
+                    console_window.cancel_requested.connect(thread.stop)
+                    
+                    # Start generation
+                    console_window.append_text(f"Starting daily stacks generation for target: {target_name}\n")
+                    console_window.append_text(f"Total files: {len(files)}\n\n")
+                    thread.start()
+                    
+                except Exception as e:
+                    QMessageBox.critical(
+                        self, 
+                        "Daily Stacks Generation Error", 
+                        f"An error occurred while starting daily stacks generation:\n{str(e)}"
+                    )
+            
             menu = build_sidebar_target_menu(
                 self.menu_tree, 
                 target_name=target_name, 
@@ -359,7 +501,45 @@ class LeftPanel(QWidget):
                 rename_target_callback=rename_target,
                 move_to_archive_callback=move_to_archive,
                 generate_masters_callback=generate_masters,
-                add_to_mpc_log_callback=add_to_mpc_log
+                add_to_mpc_log_callback=add_to_mpc_log,
+                load_in_viewer_callback=load_all_files_in_viewer,
+                generate_daily_stacks_callback=generate_daily_stacks
+            )
+            menu.exec(self.menu_tree.viewport().mapToGlobal(pos))
+        elif item and item.parent() is self.dates_item:
+            # This is a date item
+            date_text = item.text(0)
+            date_name = date_text.split(" (")[0]
+            
+            def load_all_files_in_viewer():
+                """Load all files for this date in FITS Viewer."""
+                db = get_db_manager()
+                if TIME_DISPLAY_MODE == 'Local':
+                    files = db.get_files_by_local_date(date_name)
+                else:
+                    files = db.get_files_by_date(date_name)
+                
+                if not files:
+                    QMessageBox.warning(self, "No Files", f"No files found for date '{date_name}'.")
+                    return
+                
+                # Sort files by date_obs (oldest first)
+                sorted_files = sorted(files, key=lambda f: f.date_obs if f.date_obs else datetime.min)
+                
+                # Get file paths in chronological order
+                file_paths = [f.path for f in sorted_files if f.path]
+                
+                if not file_paths:
+                    QMessageBox.warning(self, "No Files", f"No valid file paths found for date '{date_name}'.")
+                    return
+                
+                # Launch viewer with all files in chronological order
+                launch_viewer(file_paths)
+            
+            menu = build_sidebar_date_menu(
+                self.menu_tree,
+                date_name=date_name,
+                load_in_viewer_callback=load_all_files_in_viewer
             )
             menu.exec(self.menu_tree.viewport().mapToGlobal(pos))
 

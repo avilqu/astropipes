@@ -420,6 +420,49 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def get_files_by_date(self, date: str) -> list:
+        """Get all FITS files for a specific date (YYYY-MM-DD).
+        
+        Args:
+            date: Date string in YYYY-MM-DD format
+            
+        Returns:
+            List of FitsFile objects for the date
+        """
+        session = self.get_session()
+        try:
+            from datetime import datetime
+            date_obj = datetime.strptime(date, '%Y-%m-%d')
+            next_date = datetime.strptime(date, '%Y-%m-%d').replace(day=date_obj.day + 1)
+            return session.query(FitsFile).filter(
+                FitsFile.date_obs >= date_obj,
+                FitsFile.date_obs < next_date
+            ).all()
+        finally:
+            session.close()
+
+    def get_files_by_local_date(self, date: str) -> list:
+        """Get all FITS files for a specific local date (YYYY-MM-DD).
+        
+        Args:
+            date: Date string in YYYY-MM-DD format (local time)
+            
+        Returns:
+            List of FitsFile objects for the date
+        """
+        session = self.get_session()
+        try:
+            files = session.query(FitsFile).all()
+            matching_files = []
+            for file in files:
+                if file.date_obs:
+                    dt_disp = to_display_time(file.date_obs)
+                    if dt_disp.strftime('%Y-%m-%d') == date:
+                        matching_files.append(file)
+            return matching_files
+        finally:
+            session.close()
+
     def move_target_to_archive(self, target: str, archive_path: str) -> dict:
         """Move all files for a target to the archive and remove from database.
         

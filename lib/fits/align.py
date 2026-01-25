@@ -331,10 +331,10 @@ def align_images_chunked(image_datas: List[np.ndarray],
     chunk_size = chunk_size or ALIGNMENT_CHUNK_SIZE
     memory_limit = memory_limit or ALIGNMENT_MEMORY_LIMIT
     
-    log(f"\nAligning {len(image_datas)} images with chunked processing")
-    log(f"Chunk size: {chunk_size} images")
-    log(f"Memory limit: {memory_limit / 1e9:.1f} GB")
-    log(f"Method: {method}")
+    log(f"\nAligning {len(image_datas)} images with chunked processing\n")
+    log(f"Chunk size: {chunk_size} images\n")
+    log(f"Memory limit: {memory_limit / 1e9:.1f} GB\n")
+    log(f"Method: {method}\n")
     
     # Get reference image and header
     reference_image = image_datas[reference_index]
@@ -358,20 +358,20 @@ def align_images_chunked(image_datas: List[np.ndarray],
         if not chunk_indices:
             continue
             
-        log(f"\nProcessing chunk {chunk_idx + 1}/{total_chunks} (indices {chunk_indices})")
+        log(f"\nProcessing chunk {chunk_idx + 1}/{total_chunks} (indices {chunk_indices})\n")
         
         # Check memory before processing chunk
         current_memory = get_memory_usage()
-        log(f"Memory before chunk: {current_memory:.1f} MB")
+        log(f"Memory before chunk: {current_memory:.1f} MB\n")
         
         if check_memory_limit(current_memory, memory_limit / (1024 * 1024)):
-            log(f"Warning: Memory usage ({current_memory:.1f} MB) is high, forcing garbage collection")
+            log(f"Warning: Memory usage ({current_memory:.1f} MB) is high, forcing garbage collection\n")
             force_garbage_collection()
         
         # Process each image in the chunk
         for i, image_idx in enumerate(chunk_indices):
             try:
-                log(f"  Aligning image {image_idx + 1}/{len(image_datas)}")
+                log(f"  Aligning image {image_idx + 1}/{len(image_datas)}\n")
                 
                 if method == "astroalign":
                     aligned_image = _align_single_image_astroalign(
@@ -392,11 +392,11 @@ def align_images_chunked(image_datas: List[np.ndarray],
                 # Check memory after each image
                 current_memory = get_memory_usage()
                 if check_memory_limit(current_memory, memory_limit / (1024 * 1024)):
-                    log(f"Warning: High memory usage ({current_memory:.1f} MB), forcing cleanup")
+                    log(f"Warning: High memory usage ({current_memory:.1f} MB), forcing cleanup\n")
                     force_garbage_collection()
                 
             except Exception as e:
-                log(f"Warning: Failed to align image {image_idx}: {e}")
+                log(f"Warning: Failed to align image {image_idx}: {e}\n")
                 # Use original image if alignment fails
                 aligned_images[image_idx] = image_datas[image_idx]
                 processed_count += 1
@@ -407,9 +407,9 @@ def align_images_chunked(image_datas: List[np.ndarray],
         
         # Check memory after chunk
         current_memory = get_memory_usage()
-        log(f"Memory after chunk: {current_memory:.1f} MB")
+        log(f"Memory after chunk: {current_memory:.1f} MB\n")
     
-    log(f"\nChunked alignment complete. Processed {processed_count} images.")
+    log(f"\nChunked alignment complete. Processed {processed_count} images.\n")
     return aligned_images, reference_header
 
 def _align_single_image_astroalign(image: np.ndarray, reference_image: np.ndarray, image_idx: int, log_callback=None) -> np.ndarray:

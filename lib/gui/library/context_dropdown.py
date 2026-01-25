@@ -101,8 +101,22 @@ def build_empty_menu(parent=None):
     menu.addAction("No actions available (empty menu)")
     return menu 
 
-def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=None, rename_target_callback=None, move_to_archive_callback=None, generate_masters_callback=None, add_to_mpc_log_callback=None):
+def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=None, rename_target_callback=None, move_to_archive_callback=None, generate_masters_callback=None, add_to_mpc_log_callback=None, load_in_viewer_callback=None, generate_daily_stacks_callback=None):
     menu = QMenu(parent)
+    
+    # Add "Load all files in FITS Viewer" action at the top
+    if load_in_viewer_callback:
+        load_action = QAction("Load all files in FITS Viewer", menu)
+        font = load_action.font()
+        font.setBold(True)
+        load_action.setFont(font)
+        load_action.triggered.connect(load_in_viewer_callback)
+        menu.addAction(load_action)
+    
+    # Add separator if we have top actions
+    if load_in_viewer_callback:
+        menu.addSeparator()
+    
     # Add rename action
     rename_action = QAction("Rename target", menu)
     if rename_target_callback:
@@ -117,6 +131,12 @@ def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=
     if generate_masters_callback:
         generate_masters_action.triggered.connect(generate_masters_callback)
     menu.addAction(generate_masters_action)
+    
+    # Add "Generate daily stacks" action after Generate masters
+    if generate_daily_stacks_callback:
+        daily_stacks_action = QAction("Generate daily stacks", menu)
+        daily_stacks_action.triggered.connect(generate_daily_stacks_callback)
+        menu.addAction(daily_stacks_action)
     
     # Add separator before MPC log action
     menu.addSeparator()
@@ -135,6 +155,20 @@ def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=
     if move_to_archive_callback:
         archive_action.triggered.connect(move_to_archive_callback)
     menu.addAction(archive_action)
+    
+    return menu
+
+def build_sidebar_date_menu(parent=None, date_name=None, load_in_viewer_callback=None):
+    menu = QMenu(parent)
+    
+    # Add "Load all files in FITS Viewer" action
+    if load_in_viewer_callback:
+        load_action = QAction("Load all files in FITS Viewer", menu)
+        font = load_action.font()
+        font.setBold(True)
+        load_action.setFont(font)
+        load_action.triggered.connect(load_in_viewer_callback)
+        menu.addAction(load_action)
     
     return menu 
 
