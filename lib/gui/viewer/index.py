@@ -18,6 +18,7 @@ from lib.gui.viewer.histogram import HistogramController
 from lib.gui.viewer.toolbar import ToolbarController
 from lib.gui.viewer.overlay_toolbar import OverlayToolbarController
 from lib.gui.viewer.sources import SourceDetectionMixin
+from lib.gui.viewer.monitor import MonitorMixin
 from lib.sci.catalogs import AstrometryCatalog
 
 import logging
@@ -27,7 +28,7 @@ import sys
 
 
 
-class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, FileOperationsMixin, OverlayMixin, IntegrationMixin, DisplayMixin, SourceDetectionMixin, QMainWindow):
+class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, FileOperationsMixin, OverlayMixin, IntegrationMixin, DisplayMixin, SourceDetectionMixin, MonitorMixin, QMainWindow):
     def __init__(self, fits_path=None):
         super().__init__()
         self.setWindowTitle("Astropipes FITS Viewer")
@@ -86,6 +87,7 @@ class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, File
         self.sso_button = self.toolbar_controller.sso_button
         self.calibrate_button = self.toolbar_controller.calibrate_button
         self.platesolve_button = self.toolbar_controller.platesolve_button
+        self.monitor_button = self.toolbar_controller.monitor_button
         self.header_button = self.toolbar_controller.header_button
         self.integration_button = self.toolbar_controller.integration_button
         self.filelist_action = self.toolbar_controller.filelist_action

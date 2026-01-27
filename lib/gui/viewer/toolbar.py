@@ -46,6 +46,7 @@ class ToolbarController:
         self.sso_button = None
         self.calibrate_button = None
         self.platesolve_button = None
+        self.monitor_button = None
         self.header_button = None
         self.integration_button = None
         self.filelist_action = None
@@ -232,6 +233,20 @@ class ToolbarController:
         self.delete_action.triggered.connect(self.parent.delete_current_file)
         self.toolbar.addAction(self.delete_action)
         self.toolbar.widgetForAction(self.delete_action).setFixedSize(32, 32)
+
+        # Monitor mode: auto-add new FITS from data folder
+        monitor_icon = QIcon.fromTheme("redeyes-symbolic")
+        if monitor_icon.isNull():
+            monitor_icon = QIcon.fromTheme("redeyes")
+        if monitor_icon.isNull():
+            monitor_icon = QIcon.fromTheme("folder-new")
+        self.monitor_button = QAction(monitor_icon, "", self.parent)
+        self.monitor_button.setToolTip("Monitor data folder: automatically add new FITS files")
+        self.monitor_button.setCheckable(True)
+        self.monitor_button.setChecked(False)
+        self.monitor_button.toggled.connect(self.parent.toggle_monitor_mode)
+        self.toolbar.addAction(self.monitor_button)
+        self.toolbar.widgetForAction(self.monitor_button).setFixedSize(32, 32)
 
         # Header button - moved from processing controls
         self.header_button = QAction(QIcon.fromTheme("view-financial-list"), "", self.parent)

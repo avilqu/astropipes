@@ -229,12 +229,11 @@ class CalibrationMasterScanner:
         self.db_manager = get_db_manager()
         if not self.calibration_path.exists():
             raise FileNotFoundError(f"Calibration path does not exist: {self.calibration_path}")
-        self.valid_folders = {"dark": "Dark", "flat": "Flat", "bias": "Bias"}
 
     def scan_directory(self, verbose: bool = True) -> Dict[str, Any]:
         if verbose:
             print(f"Scanning calibration directory: {self.calibration_path}")
-            print(f"Expected structure: {self.calibration_path}/[dark|flat|bias]/master_*.fits")
+            print(f"Recursively searching for all FITS files...")
             print("-" * 60)
         results = {
             'total_files_found': 0,
@@ -243,32 +242,92 @@ class CalibrationMasterScanner:
             'errors': [],
             'frames_found': set(),
         }
-        for folder, frame_type in self.valid_folders.items():
-            folder_path = self.calibration_path / folder
-            if not folder_path.is_dir():
-                continue
-            results['frames_found'].add(frame_type)
+        # Recursively find all FITS files in the calibration directory
+        for fits_file in self.calibration_path.rglob("*.fits"):
+            results['total_files_found'] += 1
             if verbose:
-                print(f"Processing frame type: {frame_type}")
-            for fits_file in folder_path.glob("*.fits"):
-                results['total_files_found'] += 1
-                if verbose:
-                    print(f"  Processing: {fits_file.name}")
-                try:
-                    success = self._process_calibration_file(fits_file, frame_type)
-                    if success:
-                        results['files_imported'] += 1
-                    else:
-                        results['files_skipped'] += 1
-                except Exception as e:
-                    error_msg = f"Error processing {fits_file}: {e}"
-                    results['errors'].append(error_msg)
+                # Show relative path from calibration_path for clarity
+                rel_path = fits_file.relative_to(self.calibration_path)
+                print(f"  Processing: {rel_path}")
+            
+            try:
+                # Determine frame type from file
+                frame_type = self._determine_frame_type(fits_file)
+                if frame_type is None:
                     if verbose:
-                        print(f"    ❌ {error_msg}")
+                        print(f"    ⚠️  Skipping: Could not determine frame type")
+                    results['files_skipped'] += 1
+                    continue
+                
+                results['frames_found'].add(frame_type)
+                success = self._process_calibration_file(fits_file, frame_type)
+                if success:
+                    results['files_imported'] += 1
+                else:
+                    results['files_skipped'] += 1
+            except Exception as e:
+                error_msg = f"Error processing {fits_file}: {e}"
+                results['errors'].append(error_msg)
+                if verbose:
+                    print(f"    ❌ {error_msg}")
         results['frames_found'] = list(results['frames_found'])
         if verbose:
             self._print_summary(results)
         return results
+    
+    def _determine_frame_type(self, fits_file: Path) -> Optional[str]:
+        """
+        Determine the calibration frame type from FITS header or filename.
+        
+        Args:
+            fits_file: Path to the FITS file
+            
+        Returns:
+            Frame type string ('Dark', 'Flat', or 'Bias'), or None if cannot be determined
+        """
+        # First, try to read the FITS header
+        try:
+            header_dict = get_fits_header_as_json(str(fits_file))
+            
+            def get_val(key):
+                v = header_dict.get(key)
+                return v[0] if isinstance(v, tuple) else v
+            
+            # Check FRAME header keyword
+            frame = get_val('FRAME')
+            if frame:
+                frame_upper = str(frame).upper()
+                if 'BIAS' in frame_upper:
+                    return 'Bias'
+                elif 'DARK' in frame_upper:
+                    return 'Dark'
+                elif 'FLAT' in frame_upper:
+                    return 'Flat'
+            
+            # Check IMAGETYP header keyword
+            imagetyp = get_val('IMAGETYP')
+            if imagetyp:
+                imagetyp_upper = str(imagetyp).upper()
+                if 'BIAS' in imagetyp_upper:
+                    return 'Bias'
+                elif 'DARK' in imagetyp_upper:
+                    return 'Dark'
+                elif 'FLAT' in imagetyp_upper:
+                    return 'Flat'
+        except Exception:
+            # If header reading fails, fall back to filename
+            pass
+        
+        # Fall back to filename analysis
+        filename_lower = fits_file.name.lower()
+        if 'bias' in filename_lower:
+            return 'Bias'
+        elif 'dark' in filename_lower:
+            return 'Dark'
+        elif 'flat' in filename_lower:
+            return 'Flat'
+        
+        return None
 
     def _process_calibration_file(self, fits_file: Path, frame_type: str) -> bool:
         # Check if file already exists in database

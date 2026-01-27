@@ -6,7 +6,7 @@ Observation log table widget for displaying FITS files grouped by runs.
 import sys
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QMenu, QMessageBox, QFrame, QDialog, QTextEdit, QPushButton
 )
@@ -273,6 +273,8 @@ class FitsTableWidget(QTableWidget):
         self.itemSelectionChanged.connect(self._on_selection_changed)
         self.cellClicked.connect(self._on_cell_clicked)
     
+    RUN_TIME_WINDOW_MINUTES = 30
+
     def _group_files_by_runs(self, fits_files):
         """Group FITS files by runs based on stored run_id or target and time proximity."""
         if not fits_files:
@@ -280,6 +282,7 @@ class FitsTableWidget(QTableWidget):
         
         from lib.db import get_db_manager
         db_manager = get_db_manager()
+        window = timedelta(minutes=self.RUN_TIME_WINDOW_MINUTES)
         
         # Sort files by date_obs (most recent first)
         sorted_files = sorted(fits_files, key=lambda x: x.date_obs or datetime.min, reverse=True)
@@ -289,7 +292,6 @@ class FitsTableWidget(QTableWidget):
         unassigned_files = []
         
         for file in sorted_files:
-            # Check if file has a run_id (it's a column, so it always exists, but may be None)
             run_id = getattr(file, 'run_id', None)
             if run_id:
                 if run_id not in runs_by_id:
@@ -300,9 +302,9 @@ class FitsTableWidget(QTableWidget):
         
         # Get run objects for existing runs and extract needed attributes
         run_objects = {}
-        run_start_times = {}  # Store start_time to avoid detached instance issues
-        run_comments = {}  # Store comments to avoid detached instance issues
-        run_badges = {}  # Store badges to avoid detached instance issues
+        run_start_times = {}
+        run_comments = {}
+        run_badges = {}
         if runs_by_id:
             from lib.db.models import Run
             session = db_manager.get_session()
@@ -310,7 +312,6 @@ class FitsTableWidget(QTableWidget):
                 for run_id in runs_by_id.keys():
                     run_obj = session.query(Run).filter(Run.id == run_id).first()
                     if run_obj:
-                        # Extract attributes while session is open
                         run_objects[run_id] = run_obj
                         run_start_times[run_id] = run_obj.start_time
                         run_comments[run_id] = run_obj.comment
@@ -318,47 +319,77 @@ class FitsTableWidget(QTableWidget):
             finally:
                 session.close()
         
-        # Group unassigned files by target and time proximity
+        # Match unassigned files to existing runs (same target, within time window).
+        # New files from the watcher then pile onto the current run instead of creating new ones.
+        added_to_run = {}  # run_id -> [files]
+        still_unassigned = []
+        for file in unassigned_files:
+            if not file.date_obs or not file.target:
+                still_unassigned.append(file)
+                continue
+            best_run_id = None
+            best_end = None
+            for run_id, run_files in runs_by_id.items():
+                run_obj = run_objects.get(run_id)
+                if not run_obj or run_obj.target != file.target:
+                    continue
+                dates = [f.date_obs for f in run_files if f.date_obs]
+                if not dates:
+                    continue
+                lo = min(dates) - window
+                hi = max(dates) + window
+                if not (lo <= file.date_obs <= hi):
+                    continue
+                end = max(dates)
+                if best_end is None or end > best_end:
+                    best_end = end
+                    best_run_id = run_id
+            if best_run_id is not None:
+                if best_run_id not in added_to_run:
+                    added_to_run[best_run_id] = []
+                added_to_run[best_run_id].append(file)
+                runs_by_id[best_run_id].append(file)
+                file.run_id = best_run_id
+            else:
+                still_unassigned.append(file)
+        
+        for run_id, files_to_add in added_to_run.items():
+            if files_to_add:
+                ids = [f.id for f in files_to_add if hasattr(f, 'id') and f.id is not None]
+                if ids:
+                    db_manager.assign_files_to_run(run_id, ids)
+        
+        # Group remaining unassigned files by target and time proximity
         runs = []
         current_run = []
         
-        for file in unassigned_files:
+        for file in still_unassigned:
             if not current_run:
                 current_run = [file]
             else:
-                # Check if this file belongs to the same run
                 last_file = current_run[-1]
-                
-                # Same target and within 30 minutes of the last file
                 same_target = file.target == last_file.target
                 time_diff = abs((file.date_obs - last_file.date_obs).total_seconds() / 60) if file.date_obs and last_file.date_obs else float('inf')
-                within_time_window = time_diff <= 30  # 30 minutes threshold
-                
+                within_time_window = time_diff <= self.RUN_TIME_WINDOW_MINUTES
                 if same_target and within_time_window:
                     current_run.append(file)
                 else:
-                    # End current run and start new one
                     if current_run:
-                        runs.append((None, current_run))  # None means no run_id yet
+                        runs.append((None, current_run))
                     current_run = [file]
-        
-        # Add the last run
         if current_run:
             runs.append((None, current_run))
         
-        # Create runs in database for unassigned groups and get run objects
         final_runs = []
-        
-        # Add existing runs (with run_id)
         for run_id, run_files in runs_by_id.items():
             run_obj = run_objects.get(run_id)
             if run_obj:
-                # Store extracted comment and badges with the run for later use
                 run_obj._extracted_comment = run_comments.get(run_id)
                 run_obj._extracted_badges = run_badges.get(run_id)
-                final_runs.append((run_obj, run_files))
+                # Sort by date_obs descending (most recent first)
+                run_files_sorted = sorted(run_files, key=lambda f: f.date_obs or datetime.min, reverse=True)
+                final_runs.append((run_obj, run_files_sorted))
         
-        # Create new runs for unassigned groups
         for run_id, run_files in runs:
             if run_files:
                 target = run_files[0].target if run_files else "Unknown"
@@ -367,34 +398,27 @@ class FitsTableWidget(QTableWidget):
                     start_time = min(dates)
                     end_time = max(dates)
                     file_ids = [f.id for f in run_files if hasattr(f, 'id') and f.id is not None]
-                    if file_ids:  # Only create run if we have file IDs
+                    if file_ids:
                         run_obj = db_manager.create_or_get_run(target, start_time, end_time, file_ids)
-                        # Extract comment and badges while session might still be open, or it will be None for new runs
                         if run_obj:
                             try:
                                 run_obj._extracted_comment = run_obj.comment
                                 run_obj._extracted_badges = run_obj.badges
-                            except:
+                            except Exception:
                                 run_obj._extracted_comment = None
                                 run_obj._extracted_badges = None
                         final_runs.append((run_obj, run_files))
         
-        # Sort final runs by start_time (most recent first)
-        # Use file dates to avoid detached instance issues
         def get_start_time(run_tuple):
             run_obj, files = run_tuple
-            # Use file dates to determine start_time (avoids detached instance issues)
             dates = [f.date_obs for f in files if f.date_obs]
             if dates:
                 return min(dates)
-            # Fallback to stored start_time for existing runs if available
             if run_obj and run_obj.id in run_start_times:
                 return run_start_times[run_obj.id]
             return datetime.min
         
         final_runs.sort(key=get_start_time, reverse=True)
-        
-        # Return just the file lists (run objects are stored in run_data)
         return [(run_obj, files) for run_obj, files in final_runs]
     
     def _create_run_summary_data(self, run_obj, run_files):

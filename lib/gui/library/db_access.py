@@ -32,42 +32,50 @@ class DatabaseScannerThread(QThread):
     error_occurred = pyqtSignal(str)
     output_received = pyqtSignal(str)  # New signal for real-time output
 
+    def __init__(self, quiet=False):
+        super().__init__()
+        self.quiet = quiet
+
     def run(self):
-        import sys
         import io
         from contextlib import redirect_stdout
         try:
             from lib.db import scan_fits_library, scan_calibration_masters
-            class SignalStringIO(io.StringIO):
-                def __init__(self, signal, buffer_size=100):
-                    super().__init__()
-                    self.signal = signal
-                    self.buffer = []
-                    self.buffer_size = buffer_size
-                def write(self, text):
-                    lines = text.splitlines(keepends=True)
-                    for line in lines:
-                        self.buffer.append(line)
-                        if len(self.buffer) >= self.buffer_size:
-                            self._emit_buffer()
-                def flush(self):
-                    self._emit_buffer()
-                    super().flush()
-                def close(self):
-                    self._emit_buffer()
-                    super().close()
-                def _emit_buffer(self):
-                    if self.buffer:
-                        self.signal.emit(''.join(self.buffer))
-                        self.buffer.clear()
-            sio = SignalStringIO(self.output_received, buffer_size=100)
-            with redirect_stdout(sio):
-                fits_results = scan_fits_library()
-                print("\n--- Calibration Masters Scan ---\n")
-                calib_results = scan_calibration_masters()
-            sio.flush()  # Ensure any remaining output is emitted
+            verbose = not self.quiet
 
-            # Combine results for summary
+            if self.quiet:
+                fits_results = scan_fits_library(verbose=False)
+                calib_results = scan_calibration_masters(verbose=False)
+            else:
+                class SignalStringIO(io.StringIO):
+                    def __init__(self, signal, buffer_size=100):
+                        super().__init__()
+                        self.signal = signal
+                        self.buffer = []
+                        self.buffer_size = buffer_size
+                    def write(self, text):
+                        lines = text.splitlines(keepends=True)
+                        for line in lines:
+                            self.buffer.append(line)
+                            if len(self.buffer) >= self.buffer_size:
+                                self._emit_buffer()
+                    def flush(self):
+                        self._emit_buffer()
+                        super().flush()
+                    def close(self):
+                        self._emit_buffer()
+                        super().close()
+                    def _emit_buffer(self):
+                        if self.buffer:
+                            self.signal.emit(''.join(self.buffer))
+                            self.buffer.clear()
+                sio = SignalStringIO(self.output_received, buffer_size=100)
+                with redirect_stdout(sio):
+                    fits_results = scan_fits_library(verbose=verbose)
+                    print("\n--- Calibration Masters Scan ---\n")
+                    calib_results = scan_calibration_masters(verbose=verbose)
+                sio.flush()
+
             summary = {
                 'files_imported': fits_results.get('files_imported', 0),
                 'files_skipped': fits_results.get('files_skipped', 0),

@@ -27,7 +27,8 @@ OBS_LON = 170.483
 OBS_LAT = -43.906701849273134
 
 # Database configuration
-DATABASE_PATH = '/home/tan/dev/astropipes/astropipes.db'  # SQLite database file path (absolute path)
+# DATABASE_PATH = '/home/tan/dev/astropipes/astropipes.db'  # SQLite database file path (absolute path)
+DATABASE_PATH = '/home/tan/Astro/astropipes.db'  # SQLite database file path (absolute path)
 
 # Astrometry.net API key
 ASTROMETRY_KEY = 'zrvbykzuksfbcilr'
@@ -138,6 +139,11 @@ TESTED_FITS_CARDS = [
 # --- User Settings ---
 TIME_DISPLAY_MODE = 'UTC'
 BLINK_PERIOD_MS = 1000
+
+# Watch DATA_PATH and CALIBRATION_PATH recursively; when new files appear, run a
+# background scan and refresh the Library. Disable if you use very large trees.
+DATA_FOLDER_WATCH_ENABLED = True
+DATA_FOLDER_WATCH_DEBOUNCE_MS = 1500
 
 MPCQ_DATASET_ID = 'astropipes-467001.asteroid_institute_mpc_replica'
 MPCQ_VIEWS_DATASET_ID = 'astropipes-467001.asteroid_institute___mpc_replica_views'

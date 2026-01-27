@@ -16,6 +16,7 @@ from PyQt6.QtGui import QAction
 
 # Import our modular components
 from .db_access import DatabaseLoaderThread, DatabaseScannerThread, DatabaseManager
+from .data_folder_watcher import DataFolderWatcher
 from .obslog import FitsTableWidget
 from .main_table import MainFitsTableWidget
 from .sidebar import LeftPanel
@@ -366,6 +367,7 @@ class AstroLibraryGUI(QMainWindow):
         self.init_ui()
         self.connect_signals()
         self.setup_database_watcher()
+        self.setup_data_folder_watcher()
         self.load_database()
     
     def init_ui(self):
@@ -531,7 +533,46 @@ class AstroLibraryGUI(QMainWindow):
         
         # Trigger refresh when directory changes (SQLite may have written journal/WAL files)
         self.on_database_file_changed(db_path)
-    
+
+    def setup_data_folder_watcher(self):
+        """Watch DATA_PATH and CALIBRATION_PATH recursively; trigger background scan on changes."""
+        if not getattr(config, 'DATA_FOLDER_WATCH_ENABLED', True):
+            self.data_folder_watcher = None
+            return
+        debounce = getattr(config, 'DATA_FOLDER_WATCH_DEBOUNCE_MS', 1500)
+        self.data_folder_watcher = DataFolderWatcher(self, debounce_ms=debounce)
+        self.data_folder_watcher.set_paths([config.DATA_PATH, config.CALIBRATION_PATH])
+        self.data_folder_watcher.scan_requested.connect(self.run_watch_triggered_scan)
+        self.data_folder_watcher.start()
+
+    def run_watch_triggered_scan(self):
+        """Run a quiet background scan when the data folder watcher detects changes."""
+        if getattr(self, 'scanner_thread', None) and self.scanner_thread.isRunning():
+            return
+        self.status_label.setText("   Scanning for new files…")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.scanner_thread = DatabaseScannerThread(quiet=True)
+        self.scanner_thread.scan_completed.connect(self.on_watch_scan_completed)
+        self.scanner_thread.error_occurred.connect(self.on_watch_scan_error)
+        self.scanner_thread.start()
+
+    def on_watch_scan_completed(self, results):
+        """Handle background scan completion (no console, no dialog)."""
+        self.progress_bar.setVisible(False)
+        n = results.get('files_imported', 0) + results.get('calib_imported', 0)
+        if n > 0:
+            self.status_label.setText(f"   Added {n} new file(s)")
+        self.left_panel.repopulate_targets_and_dates()
+        self.load_database()
+        self.update_status_bar()
+
+    def on_watch_scan_error(self, error_message):
+        """Handle background scan error (log only, no dialog)."""
+        self.progress_bar.setVisible(False)
+        self.status_label.setText("   Background scan failed")
+        self.update_status_bar()
+
     def _perform_database_refresh(self):
         """Perform the actual database refresh after debounce."""
         # Refresh the database connection
@@ -716,6 +757,8 @@ class AstroLibraryGUI(QMainWindow):
     def on_settings_changed(self):
         import importlib
         importlib.reload(config)
+        if self.data_folder_watcher is not None and getattr(config, 'DATA_FOLDER_WATCH_ENABLED', True):
+            self.data_folder_watcher.set_paths([config.DATA_PATH, config.CALIBRATION_PATH])
         self.left_panel.repopulate_targets_and_dates()
         self.load_database()
 

@@ -239,8 +239,14 @@ class FileOperationsMixin:
         
         # Note: Library windows will automatically refresh via file watcher when database changes
 
-    def open_and_add_file(self, fits_path):
-        """Open and add a FITS file to the loaded files list."""
+    def open_and_add_file(self, fits_path, switch_to=True):
+        """Open and add a FITS file to the loaded files list.
+
+        Args:
+            fits_path: Path to the FITS file.
+            switch_to: If True, switch to and display the file. If False, append only
+                (used by Monitor mode to add new files without leaving the current image).
+        """
         # Clean up temporary aligned files if loading a new file that's not part of current set
         if self.loaded_files and fits_path not in self.loaded_files:
             # Check if current files are temporary aligned files
@@ -255,31 +261,47 @@ class FileOperationsMixin:
                 # Clean up temporary files when loading new files
                 self.cleanup_temp_files()
         
-        # Save zoom, center, and brightness before switching
-        if self.image_data is not None:
+        # Save zoom, center, and brightness before switching (only when we will switch)
+        if switch_to and self.image_data is not None:
             self._last_zoom = self._zoom
             self._last_center = self._get_viewport_center()
             self.histogram_controller.save_state_before_switch()
-        else:
+        elif switch_to:
             self._last_zoom = 1.0
             self._last_center = None
             self._last_brightness = 50
         
-        # If already loaded, just switch to it
+        # If already loaded, switch to it only when switch_to
         if fits_path in self.loaded_files:
-            self.current_file_index = self.loaded_files.index(fits_path)
-            self.load_fits(fits_path, restore_view=True)
-        else:
-            self.loaded_files.append(fits_path)
+            if switch_to:
+                self.current_file_index = self.loaded_files.index(fits_path)
+                self.load_fits(fits_path, restore_view=True)
+            self.update_navigation_buttons()
+            self.update_image_count_label()
+            self.update_align_button_visibility()
+            self.update_platesolve_button_visibility()
+            self.update_close_button_visibility()
+            self.update_delete_button_visibility()
+            if hasattr(self, '_filelist_window') and self._filelist_window is not None:
+                self._filelist_window.table.setRowCount(len(self.loaded_files))
+                for i, path in enumerate(self.loaded_files):
+                    item = QTableWidgetItem(os.path.basename(path))
+                    item.setToolTip(path)
+                    self._filelist_window.table.setItem(i, 0, item)
+                self._filelist_window.file_paths = list(self.loaded_files)
+                self._filelist_window.select_row(self.current_file_index)
+            return
+        
+        self.loaded_files.append(fits_path)
+        self._preload_fits_file(fits_path)
+        if switch_to or len(self.loaded_files) == 1:
             self.current_file_index = len(self.loaded_files) - 1
-            self._preload_fits_file(fits_path)
-            self.load_fits(fits_path, restore_view=False)  # New files should be centered, not restore view
-            # Auto-zoom to fit for the first file loaded
+            self.load_fits(fits_path, restore_view=False)
             if len(self.loaded_files) == 1:
-                # Process events and then apply zoom to fit
                 def delayed_zoom():
                     self.zoom_to_fit()
                 QTimer.singleShot(100, delayed_zoom)
+        # else: monitor add – keep current index, don't load_fits
         
         self.update_navigation_buttons()
         self.update_image_count_label()
@@ -288,7 +310,6 @@ class FileOperationsMixin:
         self.update_close_button_visibility()
         self.update_delete_button_visibility()
         
-        # Update file list window if open
         if hasattr(self, '_filelist_window') and self._filelist_window is not None:
             self._filelist_window.table.setRowCount(len(self.loaded_files))
             for i, path in enumerate(self.loaded_files):
