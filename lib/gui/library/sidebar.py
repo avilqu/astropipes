@@ -87,8 +87,8 @@ class LeftPanel(QWidget):
         self.menu_tree.addTopLevelItem(self.calibration_item)
         self.menu_tree.expandItem(self.calibration_item)
 
-        # Populate targets and dates immediately
-        for target in db.get_unique_targets():
+        # Populate targets and dates immediately (ordered by last image taken)
+        for target in db.get_unique_targets_by_last_image():
             count = db.get_file_count_by_target(target)
             item = QTreeWidgetItem(self.targets_item, [f"{target} ({count})"])
             item.setForeground(0, self.darker_brush)
@@ -586,8 +586,8 @@ class LeftPanel(QWidget):
         # Remove all children from targets and dates
         self.targets_item.takeChildren()
         self.dates_item.takeChildren()
-        # Repopulate targets
-        for target in db.get_unique_targets():
+        # Repopulate targets (ordered by last image taken)
+        for target in db.get_unique_targets_by_last_image():
             count = db.get_file_count_by_target(target)
             item = QTreeWidgetItem(self.targets_item, [f"{target} ({count})"])
             item.setForeground(0, self.darker_brush)

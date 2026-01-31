@@ -1,6 +1,6 @@
 import os
 import json
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 from .models import Base, FitsFile, Source, CalibrationMaster, Run, MPCLog
@@ -288,6 +288,21 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def get_unique_targets_by_last_image(self) -> list:
+        """Get unique targets ordered by last image taken (most recent first)."""
+        session = self.get_session()
+        try:
+            rows = (
+                session.query(FitsFile.target)
+                .filter(FitsFile.target.isnot(None), FitsFile.target != '')
+                .group_by(FitsFile.target)
+                .order_by(func.max(FitsFile.date_obs).desc())
+                .all()
+            )
+            return [row[0] for row in rows]
+        finally:
+            session.close()
+
     def get_unique_dates(self) -> list:
         """Get all unique observation dates (YYYY-MM-DD) from the database."""
         session = self.get_session()
@@ -329,9 +344,9 @@ class DatabaseManager:
         session = self.get_session()
         try:
             # Convert date string to datetime for comparison
-            from datetime import datetime
+            from datetime import datetime, timedelta
             date_obj = datetime.strptime(date, '%Y-%m-%d')
-            next_date = datetime.strptime(date, '%Y-%m-%d').replace(day=date_obj.day + 1)
+            next_date = date_obj + timedelta(days=1)
             return session.query(FitsFile).filter(
                 FitsFile.date_obs >= date_obj,
                 FitsFile.date_obs < next_date
