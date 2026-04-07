@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import QMessageBox
 from lib.gui.common.console_window import ConsoleOutputWindow, RealTimeStringIO
 import signal
 from .platesolving_thread import PlatesolvingThread
-from config import to_display_time
+from config import to_display_time, is_session_stack_fits_file
 from astropipes import VIEWER_PATH
 
 
@@ -472,12 +472,13 @@ class FitsTableWidget(QTableWidget):
         }
     
     def populate_table(self, fits_files):
-        """Populate the table with FITS files grouped by runs."""
-        self.fits_files = fits_files
+        """Populate the table with FITS files grouped by runs (session stacks excluded)."""
+        fits_for_runs = [f for f in fits_files if not is_session_stack_fits_file(f)]
+        self.fits_files = fits_for_runs
         self.expanded_runs.clear()
         
         # Group files by runs
-        self.run_groups = self._group_files_by_runs(fits_files)
+        self.run_groups = self._group_files_by_runs(fits_for_runs)
         
         # Calculate total rows needed (one row per run, plus expanded files)
         total_rows = len(self.run_groups)

@@ -1,4 +1,15 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QInputDialog, QMessageBox, QDialog
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QInputDialog,
+    QMessageBox,
+    QDialog,
+    QSizePolicy,
+)
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont, QBrush, QColor
 from lib.db import get_db_manager
@@ -10,7 +21,8 @@ from lib.gui.library.mpc_log_dialog import MPCLogDialog
 from datetime import datetime
 from lib.gui.library.masters_generation_thread import MastersGenerationThread
 from lib.gui.common.console_window import ConsoleOutputWindow
-from config import TIME_DISPLAY_MODE, ARCHIVE_PATH
+from config import TIME_DISPLAY_MODE, ARCHIVE_PATH, is_session_stack_fits_file
+from lib.gui.library.follow_up_filter_dialog import FollowUpFilterDialog
 
 class LeftPanel(QWidget):
     menu_selection_changed = pyqtSignal(str, str)  # (category, value)
@@ -21,7 +33,7 @@ class LeftPanel(QWidget):
         layout = QVBoxLayout(self)
         self.menu_tree = QTreeWidget()
         self.menu_tree.setHeaderHidden(True)
-        self.menu_tree.setIndentation(16)
+        self.menu_tree.setIndentation(12)
         self.menu_tree.setAnimated(True)
         self.menu_tree.setMinimumWidth(200)
         self.menu_tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
@@ -31,13 +43,19 @@ class LeftPanel(QWidget):
         self.menu_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.menu_tree.customContextMenuRequested.connect(self._show_context_menu)
 
-        # Set light grey text color, bigger font, and padding
+        # Tight left padding so item labels (and setItemWidget rows) align with the branch area
         self.menu_tree.setStyleSheet("""
             QTreeWidget {
                 color: #ffffff;
                 font-size: 14px;
             }
-    
+            QTreeWidget::item {
+                padding-top: 2px;
+                padding-bottom: 2px;
+                padding-right: 4px;
+                padding-left: 0px;
+                margin-left: -23px;
+            }
         """)
 
         # Initialize database connection
@@ -46,9 +64,11 @@ class LeftPanel(QWidget):
         # Top-level items
         self.obslog_item = QTreeWidgetItem(["Obs log"])
         self.targets_item = QTreeWidgetItem(["Targets"])
+        self.followup_item = QTreeWidgetItem(["Follow-up"])
         self.dates_item = QTreeWidgetItem(["Dates"])
         self.menu_tree.addTopLevelItem(self.obslog_item)
         self.menu_tree.addTopLevelItem(self.targets_item)
+        self.menu_tree.addTopLevelItem(self.followup_item)
         self.menu_tree.addTopLevelItem(self.dates_item)
 
         # Set bold font for expandable items
@@ -56,6 +76,7 @@ class LeftPanel(QWidget):
         bold_font.setBold(True)
         self.targets_item.setFont(0, bold_font)
         self.obslog_item.setFont(0, bold_font)
+        self.followup_item.setFont(0, bold_font)
         self.dates_item.setFont(0, bold_font)
         
         # Create darker brush for child items (used before calibration section)
@@ -89,9 +110,18 @@ class LeftPanel(QWidget):
 
         # Populate targets and dates immediately (ordered by last image taken)
         for target in db.get_unique_targets_by_last_image():
-            count = db.get_file_count_by_target(target)
-            item = QTreeWidgetItem(self.targets_item, [f"{target} ({count})"])
-            item.setForeground(0, self.darker_brush)
+            count = len(
+                [
+                    f
+                    for f in db.get_files_by_target(target)
+                    if not is_session_stack_fits_file(f)
+                ]
+            )
+            item = QTreeWidgetItem(self.targets_item)
+            self._set_target_item_display(
+                item, target, count, db.follow_up_is_flagged(target)
+            )
+        self._repopulate_follow_up_children()
         if TIME_DISPLAY_MODE == 'Local':
             for date in reversed(db.get_unique_local_dates()):
                 count = db.get_file_count_by_local_date(date)
@@ -103,8 +133,9 @@ class LeftPanel(QWidget):
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])
                 item.setForeground(0, self.darker_brush)
 
-        # Expand Targets, Dates, and Obs log by default
+        # Expand Targets, Follow-up, Dates, and Obs log by default
         self.menu_tree.expandItem(self.targets_item)
+        self.menu_tree.expandItem(self.followup_item)
         self.menu_tree.expandItem(self.dates_item)
         self.menu_tree.expandItem(self.obslog_item)
 
@@ -112,6 +143,70 @@ class LeftPanel(QWidget):
         self.setMinimumWidth(200)
 
         self.menu_tree.currentItemChanged.connect(self._emit_selection)
+
+    def _follow_up_badge_widget(self, label_text: str) -> QWidget:
+        """Small blue ``F`` to the left of ``Target (#)``. Narrow width + negative inset so the row matches plain target items."""
+        row = QWidget()
+        row.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(-12, 1, 0, 1)
+        lay.setSpacing(3)
+        badge = QLabel("F")
+        badge.setObjectName("followUpBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFixedHeight(13)
+        badge.setMinimumWidth(14)
+        badge.setMaximumWidth(14)
+        badge.setStyleSheet(
+            """
+            QLabel#followUpBadge {
+                background-color: #2563eb;
+                color: #ffffff;
+                border-radius: 2px;
+                font-size: 8px;
+                font-weight: bold;
+                padding: 0px 2px;
+            }
+            """
+        )
+        text = QLabel(label_text)
+        text.setIndent(0)
+        text.setStyleSheet("color: #bbbbbb; font-size: 14px;")
+        text.setWordWrap(False)
+        lay.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(text, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
+
+    def _set_target_item_display(
+        self, item: QTreeWidgetItem, target_name: str, count: int, flagged: bool
+    ) -> None:
+        """Plain text or badge row for a target under Targets."""
+        if flagged:
+            item.setText(0, "")
+            self.menu_tree.setItemWidget(
+                item, 0, self._follow_up_badge_widget(f"{target_name} ({count})")
+            )
+        else:
+            self.menu_tree.removeItemWidget(item, 0)
+            item.setText(0, f"{target_name} ({count})")
+        item.setData(0, Qt.ItemDataRole.UserRole, target_name)
+        item.setForeground(0, self.darker_brush)
+
+    def _repopulate_follow_up_children(self):
+        """Refresh Follow-up subtree from the database."""
+        self.followup_item.takeChildren()
+        db = get_db_manager()
+        for target in db.follow_up_get_targets():
+            n = len(
+                [
+                    f
+                    for f in db.get_files_by_target(target)
+                    if is_session_stack_fits_file(f)
+                ]
+            )
+            item = QTreeWidgetItem(self.followup_item, [f"{target} ({n})"])
+            item.setData(0, Qt.ItemDataRole.UserRole, target)
+            item.setForeground(0, self.darker_brush)
 
     def _emit_selection(self, current, previous):
         if current is self.obslog_item:
@@ -123,13 +218,21 @@ class LeftPanel(QWidget):
             self.menu_selection_changed.emit("mpc_log", "")
         elif current is self.targets_item:
             self.menu_selection_changed.emit("targets", "")
+        elif current is self.followup_item:
+            self.menu_selection_changed.emit("followup", "")
         elif current is self.dates_item:
             self.menu_selection_changed.emit("dates", "")
         elif current.parent() is self.targets_item:
-            # Extract target name from "Target (count)" format
-            target_text = current.text(0)
-            target_name = target_text.split(" (")[0]
+            target_name = current.data(0, Qt.ItemDataRole.UserRole)
+            if not target_name:
+                target_text = current.text(0)
+                target_name = target_text.split(" (")[0]
             self.menu_selection_changed.emit("target", target_name)
+        elif current.parent() is self.followup_item:
+            target_name = current.data(0, Qt.ItemDataRole.UserRole)
+            if not target_name:
+                target_name = current.text(0).split(" (")[0]
+            self.menu_selection_changed.emit("followup_target", target_name)
         elif current.parent() is self.dates_item:
             # Extract date from "Date (count)" format
             date_text = current.text(0)
@@ -148,8 +251,40 @@ class LeftPanel(QWidget):
         item = self.menu_tree.itemAt(pos)
         if item and item.parent() is self.targets_item:
             # This is a target item
-            target_text = item.text(0)
-            target_name = target_text.split(" (")[0]
+            target_name = item.data(0, Qt.ItemDataRole.UserRole)
+            if not target_name:
+                target_name = item.text(0).split(" (")[0]
+            db_ctx = get_db_manager()
+            flagged = db_ctx.follow_up_is_flagged(target_name)
+
+            def flag_follow_up():
+                dbf = get_db_manager()
+                files = dbf.get_files_by_target(target_name)
+                raw = [f for f in files if not is_session_stack_fits_file(f)]
+                filters = sorted({(f.filter_name or "Unknown") for f in raw})
+                if not filters:
+                    QMessageBox.warning(
+                        self,
+                        "No filters",
+                        f"No light frames found for target '{target_name}' (excluding session stacks).",
+                    )
+                    return
+                dlg = FollowUpFilterDialog(self, target_name, list(filters))
+                if dlg.exec() != QDialog.DialogCode.Accepted:
+                    return
+                selected = dlg.selected_filters()
+                if not selected:
+                    QMessageBox.warning(self, "No selection", "Select at least one filter.")
+                    return
+                dbf.follow_up_set_filters(target_name, selected)
+                self._repopulate_follow_up_children()
+                self.refresh_counts()
+
+            def remove_follow_up():
+                get_db_manager().follow_up_clear(target_name)
+                self._repopulate_follow_up_children()
+                self.refresh_counts()
+
             def show_info():
                 # Placeholder: show info for the target
                 print(f"Show info for target: {target_name}")
@@ -503,7 +638,9 @@ class LeftPanel(QWidget):
                 generate_masters_callback=generate_masters,
                 add_to_mpc_log_callback=add_to_mpc_log,
                 load_in_viewer_callback=load_all_files_in_viewer,
-                generate_daily_stacks_callback=generate_daily_stacks
+                generate_daily_stacks_callback=generate_daily_stacks,
+                flag_follow_up_callback=flag_follow_up if not flagged else None,
+                remove_follow_up_callback=remove_follow_up if flagged else None,
             )
             menu.exec(self.menu_tree.viewport().mapToGlobal(pos))
         elif item and item.parent() is self.dates_item:
@@ -558,9 +695,19 @@ class LeftPanel(QWidget):
         # Refresh target counts
         for i in range(self.targets_item.childCount()):
             child = self.targets_item.child(i)
-            target_name = child.text(0).split(" (")[0]
-            count = db.get_file_count_by_target(target_name)
-            child.setText(0, f"{target_name} ({count})")
+            target_name = child.data(0, Qt.ItemDataRole.UserRole)
+            if not target_name:
+                target_name = child.text(0).split(" (")[0]
+            count = len(
+                [
+                    f
+                    for f in db.get_files_by_target(target_name)
+                    if not is_session_stack_fits_file(f)
+                ]
+            )
+            self._set_target_item_display(
+                child, target_name, count, db.follow_up_is_flagged(target_name)
+            )
         
         # Refresh date counts
         for i in range(self.dates_item.childCount()):
@@ -578,7 +725,8 @@ class LeftPanel(QWidget):
         flats_count = db.get_calibration_file_count("Flat")
         self.bias_item.setText(0, f"Bias ({bias_count})")
         self.darks_item.setText(0, f"Darks ({darks_count})")
-        self.flats_item.setText(0, f"Flats ({flats_count})") 
+        self.flats_item.setText(0, f"Flats ({flats_count})")
+        self._repopulate_follow_up_children()
 
     def repopulate_targets_and_dates(self):
         """Clear and repopulate the targets and dates lists from the database."""
@@ -588,9 +736,18 @@ class LeftPanel(QWidget):
         self.dates_item.takeChildren()
         # Repopulate targets (ordered by last image taken)
         for target in db.get_unique_targets_by_last_image():
-            count = db.get_file_count_by_target(target)
-            item = QTreeWidgetItem(self.targets_item, [f"{target} ({count})"])
-            item.setForeground(0, self.darker_brush)
+            count = len(
+                [
+                    f
+                    for f in db.get_files_by_target(target)
+                    if not is_session_stack_fits_file(f)
+                ]
+            )
+            item = QTreeWidgetItem(self.targets_item)
+            self._set_target_item_display(
+                item, target, count, db.follow_up_is_flagged(target)
+            )
+        self._repopulate_follow_up_children()
         # Repopulate dates
         if TIME_DISPLAY_MODE == 'Local':
             for date in reversed(db.get_unique_local_dates()):
@@ -602,7 +759,8 @@ class LeftPanel(QWidget):
                 count = db.get_file_count_by_date(date)
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])
                 item.setForeground(0, self.darker_brush)
-        # Expand Targets, Dates, and Obs log by default
+        # Expand Targets, Follow-up, Dates, and Obs log by default
         self.menu_tree.expandItem(self.targets_item)
+        self.menu_tree.expandItem(self.followup_item)
         self.menu_tree.expandItem(self.dates_item)
-        self.menu_tree.expandItem(self.obslog_item) 
+        self.menu_tree.expandItem(self.obslog_item)

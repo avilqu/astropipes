@@ -297,6 +297,46 @@ def compute_mid_observation_time(files: List[str]) -> Optional[str]:
         return None
 
 
+def compute_mean_observation_time(files: List[str]) -> Optional[str]:
+    """
+    Mean of each input file's DATE-OBS (exposure start), as an ISO-8601 UTC string.
+
+    Used for combined stacks so DATE-OBS reflects the set of frames, not a single
+    reference header.
+    """
+    if not files:
+        return None
+
+    mjds = []
+    for fp in files:
+        try:
+            hdr = fits.getheader(fp, ext=0)
+        except Exception:
+            continue
+        date_obs = hdr.get('DATE-OBS')
+        if not date_obs:
+            continue
+        try:
+            t = Time(date_obs, format='isot', scale='utc')
+        except Exception:
+            try:
+                t = Time(date_obs)
+            except Exception:
+                continue
+        mjds.append(t.mjd)
+
+    if not mjds:
+        return None
+
+    try:
+        mean_mjd = float(np.mean(mjds))
+        t_mean = Time(mean_mjd, format='mjd', scale='utc')
+        return t_mean.isot
+    except Exception as exc:
+        print(f"Warning: could not compute mean DATE-OBS: {exc}")
+        return None
+
+
 def _copy_wcs_header(source_header, *, ra_mid: Optional[float] = None, dec_mid: Optional[float] = None, pad: Tuple[int,int,int,int] = (0,0,0,0)) -> dict:
     """Return a WCS header dictionary copied from *source_header*.
 
@@ -1369,7 +1409,8 @@ def integrate_standard(files: List[str],
                       scale: Optional[Callable] = None,
                       output_path: Optional[str] = None,
                       progress_callback: Optional[Callable] = None,
-                      memory_limit: Optional[float] = None) -> ccdp.CCDData:
+                      memory_limit: Optional[float] = None,
+                      alignment_reference_raw_path: Optional[str] = None) -> ccdp.CCDData:
     """
     Standard image integration without motion tracking.
     
@@ -1389,7 +1430,9 @@ def integrate_standard(files: List[str],
         Progress callback function(progress: float)
     memory_limit : Optional[float]
         Memory limit in bytes for processing
-        
+    alignment_reference_raw_path : Optional[str]
+        If set, written to ALIGNREF on the output stack (absolute path to the raw light used as alignment reference).
+
     Returns:
     --------
     ccdp.CCDData
@@ -1460,7 +1503,27 @@ def integrate_standard(files: List[str],
         stack.uncertainty = None
         stack.mask = None
         stack.flags = None
-        
+
+        mean_date_obs = compute_mean_observation_time(files)
+        if mean_date_obs:
+            safe_set_metadata(stack.meta, 'DATE-OBS', mean_date_obs)
+
+        safe_set_metadata(stack.meta, 'NCOMBINE', int(len(images)))
+        try:
+            for fp in files:
+                try:
+                    hdr0 = fits.getheader(fp, ext=0)
+                    if 'FILTER' in hdr0:
+                        safe_set_metadata(stack.meta, 'FILTER', hdr0['FILTER'])
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        if alignment_reference_raw_path:
+            safe_set_metadata(stack.meta, 'ALIGNREF', str(Path(alignment_reference_raw_path).resolve()))
+
         print(f"✓ Integration complete")
         
         # Save if requested

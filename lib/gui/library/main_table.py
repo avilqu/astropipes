@@ -64,15 +64,18 @@ class MainFitsTableWidget(QTableWidget):
     platesolving_completed = pyqtSignal()
     database_refresh_requested = pyqtSignal()  # New signal for database refresh
 
+    COUNT_COLUMN = 4  # stack frame count; visible only in Follow-up target view
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fits_files = []
+        self._show_stack_count_column = False
         self.init_table()
 
     def init_table(self):
-        self.setColumnCount(15)
+        self.setColumnCount(16)
         self.setHorizontalHeaderLabels([
-            "Filename", "Date obs", "Target", "Filter", "Exposure", "Bin", "Gain", "Offset", "CCD temp", "Focus", "Size", "Image Scale", "RA Center", "DEC Center", "WCS Type"
+            "Filename", "Date obs", "Target", "Filter", "Count", "Exposure", "Bin", "Gain", "Offset", "CCD temp", "Focus", "Size", "Image Scale", "RA Center", "DEC Center", "WCS Type"
         ])
         # self.verticalHeader().setVisible(False)  # Remove this line to show the vertical header
         self.verticalHeader().setVisible(True)     # Show the vertical header
@@ -91,21 +94,25 @@ class MainFitsTableWidget(QTableWidget):
         self.setColumnWidth(1, 140)   # Date obs
         self.setColumnWidth(2, 100)   # Target
         self.setColumnWidth(3, 50)    # Filter
-        self.setColumnWidth(4, 80)    # Exposure
-        self.setColumnWidth(5, 60)    # Bin
-        self.setColumnWidth(6, 60)    # Gain
-        self.setColumnWidth(7, 60)    # Offset
-        self.setColumnWidth(8, 80)    # CCD temp
-        self.setColumnWidth(9, 60)   # Focus
-        self.setColumnWidth(10, 80)   # Size
-        self.setColumnWidth(11, 80)   # Image Scale
-        self.setColumnWidth(12, 100)  # RA Center
-        self.setColumnWidth(13, 100)  # DEC Center
-        self.setColumnWidth(14, 80)   # WCS Type
+        self.setColumnWidth(4, 52)    # Count (stack frames)
+        self.setColumnWidth(5, 80)    # Exposure
+        self.setColumnWidth(6, 60)    # Bin
+        self.setColumnWidth(7, 60)    # Gain
+        self.setColumnWidth(8, 60)    # Offset
+        self.setColumnWidth(9, 80)    # CCD temp
+        self.setColumnWidth(10, 60)   # Focus
+        self.setColumnWidth(11, 80)   # Size
+        self.setColumnWidth(12, 80)   # Image Scale
+        self.setColumnWidth(13, 100)  # RA Center
+        self.setColumnWidth(14, 100)  # DEC Center
+        self.setColumnWidth(15, 80)   # WCS Type
+        self.setColumnHidden(self.COUNT_COLUMN, True)
         self.itemSelectionChanged.connect(self._on_selection_changed)
 
-    def populate_table(self, fits_files):
+    def populate_table(self, fits_files, show_stack_count_column=False):
         self.fits_files = fits_files
+        self._show_stack_count_column = show_stack_count_column
+        self.setColumnHidden(self.COUNT_COLUMN, not show_stack_count_column)
         self.blockSignals(True)  # Prevent selection events during repopulation
         self.clearSelection()
         self.setRowCount(0)  # Clear all rows
@@ -154,55 +161,60 @@ class MainFitsTableWidget(QTableWidget):
             filter_item.setForeground(QColor(30, 80, 220))  # Blue
         # L or others: leave as default (white/system)
         self.setItem(row, 3, filter_item)
+        sc = getattr(fits_file, "stack_frame_count", None)
+        count_str = str(sc) if sc is not None else "-"
+        count_item = QTableWidgetItem(count_str)
+        count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setItem(row, 4, count_item)
         if fits_file.exptime:
             exposure_str = f"{fits_file.exptime:.1f}s"
         else:
             exposure_str = "-"
         exposure_item = QTableWidgetItem(exposure_str)
         exposure_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 4, exposure_item)
+        self.setItem(row, 5, exposure_item)
         binning = fits_file.binning or "-"
         binning_item = QTableWidgetItem(binning)
         binning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 5, binning_item)
+        self.setItem(row, 6, binning_item)
         if fits_file.gain:
             gain_str = f"{fits_file.gain:.1f}"
         else:
             gain_str = "-"
         gain_item = QTableWidgetItem(gain_str)
         gain_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 6, gain_item)
+        self.setItem(row, 7, gain_item)
         if fits_file.offset:
             offset_str = f"{fits_file.offset:.1f}"
         else:
             offset_str = "-"
         offset_item = QTableWidgetItem(offset_str)
         offset_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 7, offset_item)
+        self.setItem(row, 8, offset_item)
         if fits_file.ccd_temp:
             temp_str = f"{fits_file.ccd_temp:.1f}°C"
         else:
             temp_str = "-"
         temp_item = QTableWidgetItem(temp_str)
         temp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 8, temp_item)
+        self.setItem(row, 9, temp_item)
         focus_item = QTableWidgetItem(str(int(fits_file.focus_position)) if fits_file.focus_position is not None else "-")
         focus_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 9, focus_item)
+        self.setItem(row, 10, focus_item)
         if fits_file.size_x and fits_file.size_y:
             size_str = f"{fits_file.size_x} × {fits_file.size_y}"
         else:
             size_str = "-"
         size_item = QTableWidgetItem(size_str)
         size_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 10, size_item)
+        self.setItem(row, 11, size_item)
         if fits_file.image_scale:
             scale_str = f"{fits_file.image_scale:.2f}\""
         else:
             scale_str = "-"
         scale_item = QTableWidgetItem(scale_str)
         scale_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 11, scale_item)
+        self.setItem(row, 12, scale_item)
         if fits_file.ra_center:
             ra_hours = fits_file.ra_center / 15.0
             ra_h = int(ra_hours)
@@ -213,7 +225,7 @@ class MainFitsTableWidget(QTableWidget):
             ra_str = "-"
         ra_item = QTableWidgetItem(ra_str)
         ra_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 12, ra_item)
+        self.setItem(row, 13, ra_item)
         if fits_file.dec_center:
             dec_deg = fits_file.dec_center
             dec_sign = "+" if dec_deg >= 0 else "-"
@@ -226,11 +238,11 @@ class MainFitsTableWidget(QTableWidget):
             dec_str = "-"
         dec_item = QTableWidgetItem(dec_str)
         dec_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 13, dec_item)
+        self.setItem(row, 14, dec_item)
         wcs_type = fits_file.wcs_type or "-"
         wcs_item = QTableWidgetItem(wcs_type)
         wcs_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 14, wcs_item)
+        self.setItem(row, 15, wcs_item)
 
         # Set foreground color for the filter cell only
         filter_name_upper = (fits_file.filter_name or "").upper()
@@ -273,7 +285,9 @@ class MainFitsTableWidget(QTableWidget):
         self.clearSelection()
         for row in valid_rows:
             for col in range(self.columnCount()):
-                self.item(row, col).setSelected(True)
+                cell = self.item(row, col)
+                if cell is not None:
+                    cell.setSelected(True)
         self.blockSignals(False)
         self.selection_changed.emit(selected_file_ids)
 
@@ -297,7 +311,10 @@ class MainFitsTableWidget(QTableWidget):
 
     def refresh_table(self):
         if self.fits_files:
-            self.populate_table(self.fits_files)
+            self.populate_table(
+                self.fits_files,
+                show_stack_count_column=self._show_stack_count_column,
+            )
 
     def get_visible_file_count(self):
         """Return the number of file rows currently visible."""

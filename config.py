@@ -2,6 +2,9 @@
     @author: Adrien Vilquin Barrajon <avilqu@gmail.com>
 '''
 
+import os
+from pathlib import Path
+
 import tzlocal
 from datetime import timezone
 
@@ -19,6 +22,61 @@ def to_display_time(dt_utc):
 # (and expect them to stay) in CALIBRATION_PATH.
 CALIBRATION_PATH = '/home/tan/Astro/calibration'
 DATA_PATH = '/home/tan/Astro/data'
+STACKS_PATH = '/home/tan/Astro/stacks'
+
+# Follow-up session stacks are written under STACKS_PATH/<folder>/ where <folder> is
+# data_path_target_folder_name(target). Legacy stacks may still live under
+# DATA_PATH/<folder>/Stacks/. Legacy DB rows may have filter_name == SESSION_STACK_FILTER_NAME;
+# new session stacks store the real FILTER card and are recognized by path.
+SESSION_STACK_FILTER_NAME = 'Stacks'
+
+
+def data_path_target_folder_name(target_name: str) -> str:
+    """Directory name under DATA_PATH (or STACKS_PATH) for a target (spaces → underscores)."""
+    if target_name is None:
+        return ''
+    return str(target_name).replace(' ', '_')
+
+
+def stacks_path_for_target(target_name: str) -> Path:
+    """Directory for final integrated session stacks for this target."""
+    return Path(STACKS_PATH) / data_path_target_folder_name(target_name)
+
+
+def path_indicates_session_stack(file_path: str) -> bool:
+    """
+    True if this filesystem path is a session-stack location: legacy .../Stacks/... tree
+    or any file under STACKS_PATH.
+    """
+    if not file_path:
+        return False
+    try:
+        p = Path(file_path).resolve()
+        if SESSION_STACK_FILTER_NAME in p.parts:
+            return True
+        sp = Path(STACKS_PATH).resolve()
+        try:
+            return p.is_relative_to(sp)
+        except AttributeError:
+            # Python < 3.9
+            return str(p).startswith(str(sp) + os.sep) or p == sp
+    except (ValueError, OSError):
+        return False
+
+
+def is_session_stack_fits_file(fits_file) -> bool:
+    """
+    True if this library row is a session stack (Follow-up), not a raw light frame.
+    Uses filter_name and path (STACKS_PATH tree or legacy .../Stacks/...) so rows stay
+    correct after platesolve/rescan.
+    """
+    fn = (getattr(fits_file, 'filter_name', None) or '').strip()
+    if fn == SESSION_STACK_FILTER_NAME:
+        return True
+    path = getattr(fits_file, 'path', None) or ''
+    return path_indicates_session_stack(path)
+
+
 ARCHIVE_PATH = '/home/tan/Astro/archive'
 PROCESSED_PATH = '/home/tan/.astropipes'
 

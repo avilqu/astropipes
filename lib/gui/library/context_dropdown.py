@@ -101,7 +101,19 @@ def build_empty_menu(parent=None):
     menu.addAction("No actions available (empty menu)")
     return menu 
 
-def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=None, rename_target_callback=None, move_to_archive_callback=None, generate_masters_callback=None, add_to_mpc_log_callback=None, load_in_viewer_callback=None, generate_daily_stacks_callback=None):
+def build_sidebar_target_menu(
+    parent=None,
+    target_name=None,
+    show_info_callback=None,
+    rename_target_callback=None,
+    move_to_archive_callback=None,
+    generate_masters_callback=None,
+    add_to_mpc_log_callback=None,
+    load_in_viewer_callback=None,
+    generate_daily_stacks_callback=None,
+    flag_follow_up_callback=None,
+    remove_follow_up_callback=None,
+):
     menu = QMenu(parent)
     
     # Add "Load all files in FITS Viewer" action at the top
@@ -137,6 +149,17 @@ def build_sidebar_target_menu(parent=None, target_name=None, show_info_callback=
         daily_stacks_action = QAction("Generate daily stacks", menu)
         daily_stacks_action.triggered.connect(generate_daily_stacks_callback)
         menu.addAction(daily_stacks_action)
+
+    if flag_follow_up_callback or remove_follow_up_callback:
+        menu.addSeparator()
+    if flag_follow_up_callback:
+        flag_fu = QAction("Flag for follow-up (session stacks)…", menu)
+        flag_fu.triggered.connect(flag_follow_up_callback)
+        menu.addAction(flag_fu)
+    if remove_follow_up_callback:
+        unflag_fu = QAction("Remove follow-up flag", menu)
+        unflag_fu.triggered.connect(remove_follow_up_callback)
+        menu.addAction(unflag_fu)
     
     # Add separator before MPC log action
     menu.addSeparator()

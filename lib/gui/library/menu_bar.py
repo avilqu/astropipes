@@ -1,8 +1,16 @@
 from PyQt6.QtWidgets import QMenuBar
 from PyQt6.QtGui import QAction
 
-def create_menu_bar(parent, on_exit, on_scan, on_settings=None, on_refresh=None, on_cleanup=None):
-    """Create the menu bar with File and Database menus, and connect actions to callbacks."""
+def create_menu_bar(
+    parent,
+    on_exit,
+    on_scan,
+    on_settings=None,
+    on_refresh=None,
+    on_cleanup=None,
+    on_generate_session_stacks=None,
+):
+    """Create the menu bar with File, Database, and Actions menus, and connect actions to callbacks."""
     menubar = parent.menuBar() if hasattr(parent, 'menuBar') else QMenuBar(parent)
 
     # Create File menu
@@ -30,5 +38,11 @@ def create_menu_bar(parent, on_exit, on_scan, on_settings=None, on_refresh=None,
         cleanup_action = QAction("Cleanup temp directories", parent)
         cleanup_action.triggered.connect(on_cleanup)
         db_menu.addAction(cleanup_action)
+
+    if on_generate_session_stacks is not None:
+        actions_menu = menubar.addMenu("Actions")
+        gen_session = QAction("Generate session stacks", parent)
+        gen_session.triggered.connect(on_generate_session_stacks)
+        actions_menu.addAction(gen_session)
 
     return menubar 

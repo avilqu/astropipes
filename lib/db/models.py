@@ -18,6 +18,7 @@ class FitsFile(Base):
     
     # Image parameters
     filter_name = Column(String)  # Astronomical filter (L, R, G, B, Ha, O, S, V, etc.)
+    stack_frame_count = Column(Integer)  # Frames combined (session stacks); FITS NCOMBINE / NIMAGES
     exptime = Column(Float)
     gain = Column(Float)
     offset = Column(Float)
@@ -152,6 +153,17 @@ class Run(Base):
     
     def __repr__(self):
         return f"<Run(id={self.id}, target='{self.target}', start_time='{self.start_time}', end_time='{self.end_time}')>"
+
+class FollowUpFilter(Base):
+    """Per-target filter selections for follow-up / session stack generation."""
+    __tablename__ = 'follow_up_filters'
+
+    target_name = Column(String, primary_key=True)
+    filter_name = Column(String, primary_key=True)
+
+    def __repr__(self):
+        return f"<FollowUpFilter(target={self.target_name!r}, filter={self.filter_name!r})>"
+
 
 class MPCLog(Base):
     """Model representing a Minor Planet Center observation log entry."""

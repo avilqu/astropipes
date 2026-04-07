@@ -134,7 +134,8 @@ def refresh_database():
 
 def cleanup_temp_directories():
     """
-    Delete all files in PROCESSED_PATH/solved, PROCESSED_PATH/calibrated, PROCESSED_PATH/stacked, PROCESSED_PATH/aligned, and PROCESSED_PATH/substacks.
+    Delete all files under standard PROCESSED_PATH temp/work dirs (solved, calibrated,
+    stacked, aligned, substacks, session_stacks_work).
     """
     import shutil
     import glob
@@ -145,7 +146,8 @@ def cleanup_temp_directories():
         os.path.join(base_path, "calibrated"),
         os.path.join(base_path, "stacked"),
         os.path.join(base_path, "aligned"),
-        os.path.join(base_path, "substacks")
+        os.path.join(base_path, "substacks"),
+        os.path.join(base_path, "session_stacks_work"),
     ]
     for temp_dir in temp_dirs:
         if os.path.exists(temp_dir):

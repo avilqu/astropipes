@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, 
     QMenuBar, QMessageBox, QProgressBar, QStatusBar, QSplitter, QStackedWidget, QDialog, QPushButton, QRadioButton, QHBoxLayout, QSpinBox, QGroupBox, QFileDialog, QLineEdit, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QFileSystemWatcher
+from PyQt6.QtCore import Qt, pyqtSignal, QFileSystemWatcher, QTimer
 from PyQt6.QtGui import QAction
 
 # Import our modular components
@@ -364,6 +364,7 @@ class AstroLibraryGUI(QMainWindow):
         self.last_menu_category = None
         self.last_menu_value = None
         self.console_window = None  # For scan output
+        self._suppress_db_file_watcher = False
         self.init_ui()
         self.connect_signals()
         self.setup_database_watcher()
@@ -384,7 +385,8 @@ class AstroLibraryGUI(QMainWindow):
             self.scan_for_files,
             self.open_settings_dialog,
             self.refresh_database,
-            self.cleanup_temp_directories
+            self.cleanup_temp_directories,
+            self.generate_session_stacks,
         )
         
         # Create central widget
@@ -475,30 +477,19 @@ class AstroLibraryGUI(QMainWindow):
         # Add the database file and related SQLite files to watch
         db_path = config.DATABASE_PATH
         db_dir = os.path.dirname(db_path) if os.path.dirname(db_path) else '.'
-        db_basename = os.path.basename(db_path)
-        
-        # Watch the database directory for changes (catches all SQLite files)
-        if os.path.exists(db_dir):
-            self.db_watcher.addPath(db_dir)
-            self.db_watcher.directoryChanged.connect(self.on_database_directory_changed)
-        
-        # Also watch the main database file if it exists
+
+        # Watch only the main DB file. Do NOT watch -wal / -shm / -journal: with WAL mode
+        # those change on every read/write and would spam fileChanged → refresh → infinite load.
         if os.path.exists(db_path):
             self.db_watcher.addPath(db_path)
             self.db_watcher.fileChanged.connect(self.on_database_file_changed)
-        
-        # Watch SQLite journal and WAL files (SQLite may write to these)
-        journal_path = db_path + '-journal'
-        wal_path = db_path + '-wal'
-        shm_path = db_path + '-shm'
-        
-        for sqlite_file in [journal_path, wal_path, shm_path]:
-            if os.path.exists(sqlite_file):
-                self.db_watcher.addPath(sqlite_file)
-                self.db_watcher.fileChanged.connect(self.on_database_file_changed)
+        # If DB file does not exist yet, we intentionally do not watch the directory:
+        # directory-level events are too noisy with SQLite WAL sidecar updates.
     
     def on_database_file_changed(self, path):
         """Handle database file change event."""
+        if getattr(self, "_suppress_db_file_watcher", False):
+            return
         # Debounce: use a timer to avoid multiple rapid refreshes
         if not hasattr(self, '_refresh_timer'):
             from PyQt6.QtCore import QTimer
@@ -511,28 +502,9 @@ class AstroLibraryGUI(QMainWindow):
         self._refresh_timer.start(500)
     
     def on_database_directory_changed(self, path):
-        """Handle database directory change event (e.g., database file created or SQLite journal files changed)."""
-        import os
-        import config
-        db_path = config.DATABASE_PATH
-        db_basename = os.path.basename(db_path)
-        
-        # Check if the main database file exists and add it to watcher if not already watching
-        if os.path.exists(db_path) and db_path not in self.db_watcher.files():
-            self.db_watcher.addPath(db_path)
-            if not self.db_watcher.receivers(self.db_watcher.fileChanged):
-                self.db_watcher.fileChanged.connect(self.on_database_file_changed)
-        
-        # Check for SQLite journal/WAL files and add them if they exist
-        for suffix in ['-journal', '-wal', '-shm']:
-            sqlite_file = db_path + suffix
-            if os.path.exists(sqlite_file) and sqlite_file not in self.db_watcher.files():
-                self.db_watcher.addPath(sqlite_file)
-                if not self.db_watcher.receivers(self.db_watcher.fileChanged):
-                    self.db_watcher.fileChanged.connect(self.on_database_file_changed)
-        
-        # Trigger refresh when directory changes (SQLite may have written journal/WAL files)
-        self.on_database_file_changed(db_path)
+        """Handle database directory change (e.g. main .db file created)."""
+        # Directory watching is disabled to avoid refresh loops/reinit churn with SQLite WAL.
+        return
 
     def setup_data_folder_watcher(self):
         """Watch DATA_PATH and CALIBRATION_PATH recursively; trigger background scan on changes."""
@@ -575,6 +547,8 @@ class AstroLibraryGUI(QMainWindow):
 
     def _perform_database_refresh(self):
         """Perform the actual database refresh after debounce."""
+        if getattr(self, "_suppress_db_file_watcher", False):
+            return
         # Refresh the database connection
         from . import db_access
         try:
@@ -587,6 +561,7 @@ class AstroLibraryGUI(QMainWindow):
     
     def load_database(self):
         """Load FITS files from the database."""
+        self._suppress_db_file_watcher = True
         self.status_label.setText("Loading database...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Indeterminate progress
@@ -607,8 +582,19 @@ class AstroLibraryGUI(QMainWindow):
         # If main_table_widget is visible, repopulate it with the correct filter
         if self.right_stack.currentIndex() == 1:
             if self.last_menu_category == "target":
-                filtered = [f for f in self.fits_files if f.target == self.last_menu_value]
-                self.main_table_widget.populate_table(filtered)
+                filtered = [
+                    f for f in self.fits_files
+                    if f.target == self.last_menu_value
+                    and not config.is_session_stack_fits_file(f)
+                ]
+                self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
+            elif self.last_menu_category == "followup_target":
+                filtered = [
+                    f for f in self.fits_files
+                    if f.target == self.last_menu_value
+                    and config.is_session_stack_fits_file(f)
+                ]
+                self.main_table_widget.populate_table(filtered, show_stack_count_column=True)
             elif self.last_menu_category == "date":
                 from config import TIME_DISPLAY_MODE, to_display_time
                 if TIME_DISPLAY_MODE == 'Local':
@@ -621,15 +607,21 @@ class AstroLibraryGUI(QMainWindow):
                         f for f in self.fits_files
                         if f.date_obs and f.date_obs.strftime('%Y-%m-%d') == self.last_menu_value
                     ]
-                self.main_table_widget.populate_table(filtered)
+                self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
         self.update_status_bar()
         self.progress_bar.setVisible(False)
+        QTimer.singleShot(250, self._release_db_file_watcher)
     
     def on_database_error(self, error_message):
         """Handle database loading errors."""
         self.status_label.setText("Database error")
         self.progress_bar.setVisible(False)
+        QTimer.singleShot(250, self._release_db_file_watcher)
         QMessageBox.critical(self, "Database Error", f"Failed to load database: {error_message}")
+
+    def _release_db_file_watcher(self):
+        """Re-enable QFileSystemWatcher for the DB after load finishes (avoids refresh loops with WAL)."""
+        self._suppress_db_file_watcher = False
     
     def on_table_selection_changed(self, fits_file_ids):
         """Handle table selection changes."""
@@ -655,8 +647,18 @@ class AstroLibraryGUI(QMainWindow):
                 session.close()
             self.right_stack.setCurrentIndex(5)
         elif category == "target":
-            filtered = [f for f in self.fits_files if f.target == value]
-            self.main_table_widget.populate_table(filtered)
+            filtered = [
+                f for f in self.fits_files
+                if f.target == value and not config.is_session_stack_fits_file(f)
+            ]
+            self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
+            self.right_stack.setCurrentIndex(1)
+        elif category == "followup_target":
+            filtered = [
+                f for f in self.fits_files
+                if f.target == value and config.is_session_stack_fits_file(f)
+            ]
+            self.main_table_widget.populate_table(filtered, show_stack_count_column=True)
             self.right_stack.setCurrentIndex(1)
         elif category == "date":
             from config import TIME_DISPLAY_MODE, to_display_time
@@ -670,7 +672,7 @@ class AstroLibraryGUI(QMainWindow):
                     f for f in self.fits_files
                     if f.date_obs and f.date_obs.strftime('%Y-%m-%d') == value
                 ]
-            self.main_table_widget.populate_table(filtered)
+            self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
             self.right_stack.setCurrentIndex(1)
         elif category == "darks":
             db = get_db_manager()
@@ -800,8 +802,58 @@ class AstroLibraryGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Refresh Failed", f"Failed to refresh database: {e}")
 
+    def generate_session_stacks(self):
+        """Generate session stacks for all follow-up targets, platesolve, and register FITS in the database."""
+        from lib.gui.library.session_stacks_thread import SessionStacksBatchThread
+
+        db = get_db_manager()
+        if not db.follow_up_get_targets():
+            QMessageBox.information(
+                self,
+                "No follow-up targets",
+                "Flag one or more targets from the sidebar (right-click → Flag for follow-up) first.",
+            )
+            return
+        if getattr(self, "_session_stacks_thread", None) and self._session_stacks_thread.isRunning():
+            QMessageBox.warning(self, "Busy", "Session stack generation is already running.")
+            return
+        cw = ConsoleOutputWindow("Generate session stacks", self)
+        cw.clear_output()
+        cw.show_and_raise()
+        self._session_stacks_thread = SessionStacksBatchThread()
+        self._session_stacks_thread.output.connect(cw.append_text)
+
+        def on_finished(res):
+            cw.append_text("\n— Finished —\n")
+            cw.close_button.setEnabled(True)
+            # Defer reload so the worker thread releases SQLite before another thread queries.
+            def _reload_after_batch():
+                from . import db_access
+                try:
+                    db_access.refresh_database()
+                except Exception as e:
+                    print(f"refresh_database after session stacks: {e}")
+                self.load_database()
+
+            QTimer.singleShot(400, _reload_after_batch)
+            errs = res.get("errors") or []
+            if res.get("cancelled"):
+                QMessageBox.information(self, "Cancelled", "Session stack generation was cancelled.")
+            elif res.get("error"):
+                QMessageBox.warning(self, "Session stacks", str(res.get("error")))
+            elif errs:
+                QMessageBox.warning(
+                    self,
+                    "Session stacks",
+                    f"Completed with {len(errs)} issue(s). See the console for details.",
+                )
+
+        self._session_stacks_thread.finished.connect(on_finished)
+        cw.cancel_requested.connect(self._session_stacks_thread.stop)
+        self._session_stacks_thread.start()
+
     def cleanup_temp_directories(self):
-        """Delete all files in PROCESSED_PATH subdirectories (solved, calibrated, stacked, aligned, substacks)."""
+        """Delete work files under PROCESSED_PATH (solved, calibrated, stacked, aligned, substacks, session_stacks_work)."""
         from . import db_access
         try:
             db_access.cleanup_temp_directories()

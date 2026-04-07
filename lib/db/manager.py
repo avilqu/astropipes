@@ -1,9 +1,10 @@
 import os
 import json
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, event, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
-from .models import Base, FitsFile, Source, CalibrationMaster, Run, MPCLog
+from sqlalchemy.pool import NullPool
+from .models import Base, FitsFile, Source, CalibrationMaster, Run, MPCLog, FollowUpFilter
 from config import to_display_time
 
 class DatabaseManager:
@@ -28,8 +29,24 @@ class DatabaseManager:
     def _initialize_database(self):
         """Initialize the database engine and create tables if they don't exist."""
         try:
-            # Create SQLite engine
-            self.engine = create_engine(f'sqlite:///{self.db_path}', echo=False)
+            # NullPool: close SQLite connections when sessions close (avoids cross-thread pool reuse).
+            # WAL + busy_timeout: reduce "database is locked" when GUI + worker threads access DB.
+            self.engine = create_engine(
+                f"sqlite:///{self.db_path}",
+                echo=False,
+                poolclass=NullPool,
+                connect_args={"check_same_thread": False, "timeout": 60.0},
+            )
+
+            @event.listens_for(self.engine, "connect")
+            def _sqlite_on_connect(dbapi_connection, _connection_record):
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA foreign_keys=ON")
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA busy_timeout=60000")
+                finally:
+                    cursor.close()
             
             # Create all tables
             Base.metadata.create_all(self.engine)
@@ -86,6 +103,18 @@ class DatabaseManager:
                     conn.execute(text("ALTER TABLE runs ADD COLUMN badges TEXT"))
                     conn.commit()
                 print("Added 'badges' column to 'runs' table")
+
+        if 'follow_up_filters' not in existing_tables:
+            FollowUpFilter.__table__.create(self.engine, checkfirst=True)
+            print("Created 'follow_up_filters' table")
+
+        if 'fits_files' in existing_tables:
+            columns = [col['name'] for col in inspector.get_columns('fits_files')]
+            if 'stack_frame_count' not in columns:
+                with self.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE fits_files ADD COLUMN stack_frame_count INTEGER"))
+                    conn.commit()
+                print("Added 'stack_frame_count' column to 'fits_files' table")
     
     def get_session(self) -> Session:
         """Get a new database session.
@@ -435,6 +464,68 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def follow_up_set_filters(self, target_name: str, filter_names: list) -> None:
+        """Replace follow-up filter selections for a target."""
+        session = self.get_session()
+        try:
+            session.query(FollowUpFilter).filter(FollowUpFilter.target_name == target_name).delete()
+            for fn in filter_names:
+                session.add(FollowUpFilter(target_name=target_name, filter_name=fn))
+            session.commit()
+        except SQLAlchemyError as e:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def follow_up_clear(self, target_name: str) -> None:
+        """Remove follow-up flag and stored filters for a target."""
+        session = self.get_session()
+        try:
+            session.query(FollowUpFilter).filter(FollowUpFilter.target_name == target_name).delete()
+            session.commit()
+        except SQLAlchemyError as e:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def follow_up_get_targets(self) -> list:
+        """Distinct target names that have at least one follow-up filter row."""
+        session = self.get_session()
+        try:
+            rows = (
+                session.query(FollowUpFilter.target_name)
+                .distinct()
+                .order_by(FollowUpFilter.target_name)
+                .all()
+            )
+            return [r[0] for r in rows]
+        finally:
+            session.close()
+
+    def follow_up_get_filters(self, target_name: str) -> list:
+        """Filter names selected for follow-up for this target."""
+        session = self.get_session()
+        try:
+            rows = (
+                session.query(FollowUpFilter.filter_name)
+                .filter(FollowUpFilter.target_name == target_name)
+                .order_by(FollowUpFilter.filter_name)
+                .all()
+            )
+            return [r[0] for r in rows]
+        finally:
+            session.close()
+
+    def follow_up_is_flagged(self, target_name: str) -> bool:
+        session = self.get_session()
+        try:
+            n = session.query(FollowUpFilter).filter(FollowUpFilter.target_name == target_name).count()
+            return n > 0
+        finally:
+            session.close()
+
     def get_files_by_date(self, date: str) -> list:
         """Get all FITS files for a specific date (YYYY-MM-DD).
         
@@ -496,7 +587,33 @@ class DatabaseManager:
         results = {'files_moved': 0, 'files_removed': 0, 'errors': []}
         
         try:
-            # Get all files for this target
+            import config
+            
+            # Remove follow-up flags and session stacks (DB + disk) before archiving raw data
+            session.query(FollowUpFilter).filter(FollowUpFilter.target_name == target).delete()
+            stack_rows = [
+                r
+                for r in session.query(FitsFile).filter(FitsFile.target == target).all()
+                if config.is_session_stack_fits_file(r)
+            ]
+            for row in stack_rows:
+                session.delete(row)
+                results['files_removed'] += 1
+            stacks_path = config.stacks_path_for_target(target)
+            legacy_stacks_path = (
+                Path(config.DATA_PATH)
+                / config.data_path_target_folder_name(target)
+                / config.SESSION_STACK_FILTER_NAME
+            )
+            session.commit()
+            for tree in (stacks_path, legacy_stacks_path):
+                if tree.exists():
+                    try:
+                        shutil.rmtree(tree)
+                    except Exception as e:
+                        results['errors'].append({'path': str(tree), 'error': str(e)})
+            
+            # Remaining FITS rows for this target (light frames, etc.)
             files = session.query(FitsFile).filter(FitsFile.target == target).all()
             
             print(f"Found {len(files)} files in database for target '{target}'")

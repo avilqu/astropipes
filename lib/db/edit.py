@@ -3,7 +3,7 @@ import os
 import shutil
 from pathlib import Path
 from lib.db.manager import get_db_manager
-from lib.db.models import FitsFile, Run
+from lib.db.models import FitsFile, Run, FollowUpFilter
 from lib.fits import set_fits_header_value
 from lib.db.scan import normalize_object_name, rescan_single_file
 from sqlalchemy.orm import Session
@@ -82,6 +82,13 @@ def rename_target_across_database(old_target: str, new_target: str, commit: bool
             return results  # Don't proceed if folder rename failed
         else:
             results['folder_renamed'] = folder_result['folder_renamed']
+        
+        # Rename follow-up filter rows to match new target name
+        fu_rows = session.query(FollowUpFilter).filter(FollowUpFilter.target_name == old_norm).all()
+        for row in fu_rows:
+            fn = row.filter_name
+            session.delete(row)
+            session.add(FollowUpFilter(target_name=new_norm, filter_name=fn))
         
         # Get all files for this target before updating paths
         files = session.query(FitsFile).filter(FitsFile.target == old_norm).all()

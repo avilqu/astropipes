@@ -132,10 +132,21 @@ class FitsFileScanner:
             v = header_dict.get(key)
             return v[0] if isinstance(v, tuple) else v
 
+        stack_n = None
+        for key in ('NCOMBINE', 'NIMAGES', 'STACKCNT'):
+            v = get_val(key)
+            if v is not None and v != '':
+                try:
+                    stack_n = int(float(v))
+                    break
+                except (TypeError, ValueError):
+                    continue
+
         fits_data = {
             'path': str(fits_file),
             'target': normalize_object_name(get_val('OBJECT')),  # Normalized OBJECT from header as target
             'filter_name': filter_name,  # Use directory name as filter
+            'stack_frame_count': stack_n,
             'date_obs': self._parse_date_obs(get_val('DATE-OBS')),
             'exptime': get_val('EXPTIME'),
             'gain': get_val('GAIN'),
@@ -154,6 +165,68 @@ class FitsFileScanner:
         }
         
         # Add to database
+        self.db_manager.add_fits_file(fits_data)
+        return True
+
+    def import_fits_with_layout_target(
+        self, fits_file: Path, target_name: str, filter_fallback: Optional[str] = None
+    ) -> bool:
+        """
+        Import a FITS file with explicit target (e.g. session stack under STACKS_PATH).
+        Filter uses the FITS FILTER card when present, otherwise *filter_fallback*.
+        stack_frame_count uses NCOMBINE, NIMAGES, or STACKCNT when present.
+        """
+        existing_file = self.db_manager.get_fits_file_by_path(str(fits_file))
+        if existing_file:
+            return False
+        header_dict = get_fits_header_as_json(str(fits_file))
+
+        def get_val(key):
+            v = header_dict.get(key)
+            return v[0] if isinstance(v, tuple) else v
+
+        filt = get_val('FILTER')
+        if filt is not None and str(filt).strip() != '':
+            filter_stored = str(filt).strip()
+        elif filter_fallback is not None:
+            filter_stored = filter_fallback
+        else:
+            filter_stored = None
+
+        stack_n = None
+        for key in ('NCOMBINE', 'NIMAGES', 'STACKCNT'):
+            v = get_val(key)
+            if v is not None and v != '':
+                try:
+                    stack_n = int(float(v))
+                    break
+                except (TypeError, ValueError):
+                    continue
+
+        fits_data = {
+            'path': str(fits_file),
+            'target': normalize_object_name(target_name),
+            'filter_name': filter_stored,
+            'stack_frame_count': stack_n,
+            'date_obs': self._parse_date_obs(get_val('DATE-OBS')),
+            'exptime': get_val('EXPTIME'),
+            'gain': get_val('GAIN'),
+            'offset': get_val('OFFSET'),
+            'focus_position': get_val('FOCUSPOS'),
+            'ccd_temp': get_val('CCD-TEMP'),
+            'binning': self._format_binning(get_val('XBINNING'), get_val('YBINNING')),
+            'size_x': get_val('NAXIS1'),
+            'size_y': get_val('NAXIS2'),
+            'image_scale': get_val('SCALE'),
+            'ra_center': get_val('CRVAL1'),
+            'dec_center': get_val('CRVAL2'),
+            'wcs_type': get_val('CTYPE1'),
+            'header_json': json.dumps(header_dict),
+            'simbad_objects': '[]',
+        }
+        if fits_data['date_obs'] is None:
+            from datetime import datetime
+            fits_data['date_obs'] = datetime.now()
         self.db_manager.add_fits_file(fits_data)
         return True
     
@@ -569,7 +642,16 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
             # Extract header values with defaults
             date_obs_str = header.get('DATE-OBS', '')
             target = normalize_object_name(header.get('OBJECT', ''))
-            filter_name = header.get('FILTER', '')
+            filter_name = header.get('FILTER', '') or ''
+            stack_frame_count = None
+            for _k in ('NCOMBINE', 'NIMAGES', 'STACKCNT'):
+                _v = header.get(_k)
+                if _v is not None:
+                    try:
+                        stack_frame_count = int(float(_v))
+                        break
+                    except (TypeError, ValueError):
+                        continue
             exptime = header.get('EXPTIME', 0.0)
             gain = header.get('GAIN', 0.0)
             offset = header.get('OFFSET', 0.0)
@@ -638,7 +720,8 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
                     # Update all fields
                     fits_file.date_obs = date_obs
                     fits_file.target = target
-                    fits_file.filter_name = filter_name
+                    fits_file.filter_name = filter_name or None
+                    fits_file.stack_frame_count = stack_frame_count
                     fits_file.exptime = exptime
                     fits_file.gain = gain
                     fits_file.offset = offset
@@ -665,6 +748,7 @@ def rescan_single_file(file_path: str) -> Dict[str, Any]:
                             'date_obs': date_obs,
                             'target': target,
                             'filter_name': filter_name,
+                            'stack_frame_count': stack_frame_count,
                             'exptime': exptime,
                             'wcs_type': wcs_type,
                             'image_scale': image_scale,
