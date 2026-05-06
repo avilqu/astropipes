@@ -8,7 +8,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import config
 from lib.db import get_db_manager
 from lib.db.scan import FitsFileScanner
-from lib.gui.library.daily_stacks_thread import generate_daily_stacks_impl
+from lib.gui.library.daily_stacks_thread import generate_daily_stacks_impl, log_console_step_banner
 from lib.sci.platesolving import solve_single_image
 
 
@@ -72,7 +72,7 @@ class SessionStacksBatchThread(QThread):
                     / "aligned"
                 )
                 aligned_dir.mkdir(parents=True, exist_ok=True)
-                self.output.emit(f"\n{'='*60}\nSession stacks: {target} / {fn}\n{'='*60}\n")
+                log_console_step_banner(lambda m: self.output.emit(m), f"Session stacks: {target} / {fn}")
                 res = generate_daily_stacks_impl(
                     target,
                     subset,

@@ -6,6 +6,7 @@ Handles daily stacks generation (group by session, calibrate, align, integrate) 
 
 import sys
 import os
+import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -116,6 +117,30 @@ def _norm_path_str(p):
         return os.path.normpath(os.path.abspath(p))
 
 
+def _terminal_columns():
+    """Approximate console width for rule lines (embedded GUI consoles often report 80)."""
+    try:
+        cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+    except Exception:
+        cols = 80
+    return max(40, min(int(cols), 120))
+
+
+def log_console_step_banner(log, step_title_plain: str):
+    """
+    Section header using '=' rules sized to the terminal width (not flat 120+ chars wide).
+    Each line ends with a newline so QTextEdit-style consoles don't join lines sideways.
+    """
+    # Keep a small margin so banners do not hit the console edge.
+    w = max(20, _terminal_columns() - 8)
+    sep = "=" * w
+    cy = Style.BRIGHT + Fore.CYAN
+    rs = Style.RESET_ALL
+    log(f"\n{cy}{sep}{rs}\n")
+    log(f"{cy}{step_title_plain}{rs}\n")
+    log(f"{cy}{sep}{rs}\n")
+
+
 def _read_alignref_raw_from_stack_fits(stack_path: str):
     """Return absolute raw path from ALIGNREF if present and the file exists on disk."""
     try:
@@ -185,9 +210,7 @@ def generate_daily_stacks_impl(
     log(f"{Style.BRIGHT + Fore.BLUE}Starting daily stacks generation for target: {target_name}{filter_info}{Style.RESET_ALL}")
     log(f"Total files: {len(files)}\n")
 
-    log(f"\n{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}Step 1: Grouping files by session (12h threshold){Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
+    log_console_step_banner(log, "Step 1: Grouping files by session (12h threshold)")
 
     sessions = group_files_by_session(files, session_threshold_hours=12)
 
@@ -292,9 +315,7 @@ def generate_daily_stacks_impl(
         except Exception as e:
             return {'error': f"Could not calibrate alignment reference frame: {e}", 'success': False}
 
-    log(f"\n{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}Step 2: Calibrating {len(files_to_process)} images for pending sessions{Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
+    log_console_step_banner(log, f"Step 2: Calibrating {len(files_to_process)} images for pending sessions")
 
     calibrated_paths = []
     file_to_calibrated = {}
@@ -332,7 +353,17 @@ def generate_daily_stacks_impl(
     if ref_cal_path is None:
         ref_cal_path = extra_ref_calibrated_path
     if ref_cal_path is None:
-        ref_cal_path = file_to_calibrated.get(sorted_files[0])
+        # Designated raw (ALIGNREF or earliest light) may fail calibration (e.g. flat size
+        # mismatch) while later subs still calibrate; use first successful light as ref.
+        for f in sorted_files:
+            cp = file_to_calibrated.get(f)
+            if cp:
+                ref_cal_path = cp
+                log(
+                    f"\n{Fore.YELLOW}Alignment reference raw had no calibrated frame in this batch; "
+                    f"using first calibrated light: {os.path.basename(f.path)}{Style.RESET_ALL}\n"
+                )
+                break
 
     if not ref_cal_path:
         return {'error': 'Could not resolve calibrated alignment reference frame', 'success': False}
@@ -353,9 +384,7 @@ def generate_daily_stacks_impl(
         + (f" (+1 reference)" if extra_ref_calibrated_path else "")
         + f"{Style.RESET_ALL}\n")
 
-    log(f"\n{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}Step 3: Aligning all {len(ordered_cal_paths)} images together{Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
+    log_console_step_banner(log, f"Step 3: Aligning all {len(ordered_cal_paths)} images together")
 
     image_datas = []
     headers = []
@@ -410,9 +439,7 @@ def generate_daily_stacks_impl(
         log(f"{Fore.RED}✗ {error_msg}{Style.RESET_ALL}\n")
         return {'error': error_msg, 'success': False}
 
-    log(f"\n{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}Step 4: Saving aligned images and generating stacks{Style.RESET_ALL}")
-    log(f"{Style.BRIGHT + Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
+    log_console_step_banner(log, "Step 4: Saving aligned images and generating stacks")
 
     if aligned_output_dir is not None:
         aligned_dir = aligned_output_dir
@@ -431,11 +458,13 @@ def generate_daily_stacks_impl(
             from lib.fits.wcs import copy_wcs_from_reference
             aligned_header = copy_wcs_from_reference(reference_header, aligned_header)
 
-            # Keep each frame's observation time (reference header would duplicate DATE-OBS on all)
+            # Keep each frame's observation time and band (reference header would duplicate on all)
             _orig = headers[i]
             for _key in ('DATE-OBS', 'TIME-OBS', 'MJD-OBS', 'DATE-END'):
                 if _key in _orig:
                     aligned_header[_key] = _orig[_key]
+            if 'FILTER' in _orig:
+                aligned_header['FILTER'] = _orig['FILTER']
 
             aligned_header['ALIGNED'] = (True, 'Image has been aligned')
             if align_ref_str:
