@@ -64,6 +64,10 @@ if __name__ == "__main__":
         help="calibrate one or more FITS files using master bias, dark, and flat"
     )
     parser.add_argument(
+        "-M", "--masters", choices=["bias", "dark", "flat"], metavar="TYPE",
+        help='generate a calibration master from input files (choices: "bias", "dark", "flat")'
+    )
+    parser.add_argument(
         "-A", "--align", nargs="+", metavar="FITS_FILE", 
         help="align multiple FITS files using the first as reference (supports WCS reprojection & astroalign)"
     )
@@ -87,6 +91,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--get-neocp-objects", action="store_true", help="get the current list of objects on the NEOCP"
+    )
+    parser.add_argument(
+        "files", nargs="*", metavar="FITS_FILE",
+        help="input FITS files for commands that use positional files, such as --masters"
     )
     
     args = parser.parse_args()
@@ -343,6 +351,40 @@ if __name__ == "__main__":
             sys.exit(1)
         except Exception as e:
             print(f"{Style.BRIGHT + Fore.RED}Error during calibration: {e}{Style.RESET_ALL}")
+            sys.exit(1)
+
+    def generate_calibration_master_cli():
+        """Generate a calibration master bias, dark, or flat from input FITS files."""
+        try:
+            from lib.fits.masters import CalibrationMasterGenerationError, generate_calibration_master
+        except ImportError as e:
+            print(f"{Style.BRIGHT + Fore.RED}Error: Required modules not found.{Style.RESET_ALL}")
+            print(f"Error details: {e}")
+            sys.exit(1)
+        
+        try:
+            if not args.files:
+                print(f"{Style.BRIGHT + Fore.RED}No input FITS files provided for master generation{Style.RESET_ALL}")
+                print(f"Usage: {os.path.basename(sys.argv[0])} --masters {args.masters} <fits files...>")
+                sys.exit(1)
+
+            print(f"{Style.BRIGHT + Fore.BLUE}Starting master {args.masters} generation for {len(args.files)} file(s)...{Style.RESET_ALL}")
+            print(f"{Style.BRIGHT + Fore.CYAN}Output directory: {config.CALIBRATION_PATH}{Style.RESET_ALL}")
+
+            result = generate_calibration_master(args.masters, args.files)
+            if result.get("success"):
+                print(f"\n{Style.BRIGHT + Fore.GREEN}✓ Master {result['frame'].lower()} generated successfully!{Style.RESET_ALL}")
+                print(f"  Files used: {result['files_used']}")
+                print(f"  Output: {result['path']}")
+            else:
+                print(f"{Style.BRIGHT + Fore.RED}✗ Master generation failed{Style.RESET_ALL}")
+                sys.exit(1)
+
+        except CalibrationMasterGenerationError as e:
+            print(f"{Style.BRIGHT + Fore.RED}Master generation failed: {e}{Style.RESET_ALL}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"{Style.BRIGHT + Fore.RED}Error during master generation: {e}{Style.RESET_ALL}")
             sys.exit(1)
 
     def align_images_cli():
@@ -820,6 +862,8 @@ if __name__ == "__main__":
         solve_image()
     elif args.calibrate:
         calibrate_image()
+    elif args.masters:
+        generate_calibration_master_cli()
     elif args.align:
         align_images_cli()
     elif args.integrate:

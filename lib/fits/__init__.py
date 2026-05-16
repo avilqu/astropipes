@@ -20,6 +20,11 @@ from .wcs import (
     ImageValidationError
 )
 from .calibration import CalibrationManager
+from .masters import (
+    CalibrationMasterGenerationError,
+    CalibrationMasterGenerator,
+    generate_calibration_master
+)
 from .integration import (
     integrate_with_motion_tracking,
     integrate_standard,
@@ -48,6 +53,9 @@ __all__ = [
     'WCSApplicationError',
     'ImageValidationError',
     'CalibrationManager',
+    'CalibrationMasterGenerationError',
+    'CalibrationMasterGenerator',
+    'generate_calibration_master',
     'integrate_with_motion_tracking',
     'integrate_standard',
     'calculate_motion_shifts',
