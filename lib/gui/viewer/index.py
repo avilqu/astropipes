@@ -19,6 +19,7 @@ from lib.gui.viewer.toolbar import ToolbarController
 from lib.gui.viewer.overlay_toolbar import OverlayToolbarController
 from lib.gui.viewer.sources import SourceDetectionMixin
 from lib.gui.viewer.monitor import MonitorMixin
+from lib.gui.viewer.region_of_interest import RegionOfInterestMixin
 from lib.sci.catalogs import AstrometryCatalog
 
 import logging
@@ -28,7 +29,19 @@ import sys
 
 
 
-class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, FileOperationsMixin, OverlayMixin, IntegrationMixin, DisplayMixin, SourceDetectionMixin, MonitorMixin, QMainWindow):
+class FITSViewer(
+    NavigationMixin,
+    CatalogSearchMixin,
+    ImageOperationsMixin,
+    FileOperationsMixin,
+    OverlayMixin,
+    IntegrationMixin,
+    DisplayMixin,
+    SourceDetectionMixin,
+    MonitorMixin,
+    RegionOfInterestMixin,
+    QMainWindow,
+):
     def __init__(self, fits_path=None):
         super().__init__()
         self.setWindowTitle("Astropipes FITS Viewer")
@@ -83,6 +96,7 @@ class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, File
         self.reset_zoom_action = self.toolbar_controller.reset_zoom_action
         self.zoom_to_fit_action = self.toolbar_controller.zoom_to_fit_action
         self.zoom_region_action = self.toolbar_controller.zoom_region_action
+        self.define_roi_action = self.toolbar_controller.define_roi_action
         self.simbad_button = self.toolbar_controller.simbad_button
         self.sso_button = self.toolbar_controller.sso_button
         self.calibrate_button = self.toolbar_controller.calibrate_button
@@ -121,6 +135,7 @@ class FITSViewer(NavigationMixin, CatalogSearchMixin, ImageOperationsMixin, File
         self._source_highlight_index = None  # Track highlighted source
         self._source_overlay = None  # Store source overlay data
         self._zoom_region_mode = False  # Track if zoom-to-region is active
+        self._define_roi_mode = False
         self._pending_zoom_rect = None  # Store the last selected rectangle
         self._computed_positions_overlay = None  # Store computed positions overlay data
         if fits_path:

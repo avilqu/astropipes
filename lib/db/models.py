@@ -1,6 +1,5 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
 
@@ -190,4 +189,43 @@ class MPCLog(Base):
     comment = Column(Text, nullable=True)
     
     def __repr__(self):
-        return f"<MPCLog(id={self.id}, target='{self.target_name}', date='{self.observation_date}', status='{self.status}')>" 
+        return f"<MPCLog(id={self.id}, target='{self.target_name}', date='{self.observation_date}', status='{self.status}')>"
+
+
+class RegionOfInterest(Base):
+    """Sky region defined on a platesolved image (axis-aligned RA/Dec box)."""
+    __tablename__ = 'regions_of_interest'
+    __table_args__ = (UniqueConstraint('target', 'name', name='uq_region_target_name'),)
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    target = Column(String, nullable=False)
+    ra_min = Column(Float, nullable=False)
+    ra_max = Column(Float, nullable=False)
+    dec_min = Column(Float, nullable=False)
+    dec_max = Column(Float, nullable=False)
+    defined_from_path = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+    views = relationship("RegionView", back_populates="region", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<RegionOfInterest(id={self.id}, name={self.name!r}, target={self.target!r})>"
+
+
+class RegionView(Base):
+    """Generated PNG crop of a region from a stack FITS file."""
+    __tablename__ = 'region_views'
+
+    id = Column(Integer, primary_key=True)
+    region_id = Column(Integer, ForeignKey('regions_of_interest.id'), nullable=False)
+    stack_fits_path = Column(String, nullable=False)
+    png_path = Column(String, unique=True, nullable=False)
+    date_obs = Column(DateTime, nullable=True)
+    display_min = Column(Float, nullable=True)
+    display_max = Column(Float, nullable=True)
+
+    region = relationship("RegionOfInterest", back_populates="views")
+
+    def __repr__(self):
+        return f"<RegionView(id={self.id}, region_id={self.region_id}, png_path={self.png_path!r})>" 

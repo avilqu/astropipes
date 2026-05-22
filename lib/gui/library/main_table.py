@@ -25,6 +25,155 @@ from .platesolving_thread import PlatesolvingThread
 from config import to_display_time
 from astropipes import VIEWER_PATH
 
+FITS_TABLE_HEADERS = [
+    "Filename",
+    "Date obs",
+    "Target",
+    "Filter",
+    "Count",
+    "Exposure",
+    "Bin",
+    "Gain",
+    "Offset",
+    "CCD temp",
+    "Focus",
+    "Size",
+    "Image Scale",
+    "RA Center",
+    "DEC Center",
+    "WCS Type",
+]
+FITS_TABLE_COLUMN_WIDTHS = [200, 140, 100, 50, 52, 80, 60, 60, 60, 80, 60, 80, 80, 100, 100, 80]
+FITS_TABLE_COUNT_COLUMN = 4
+
+
+def configure_fits_table_widget(table: QTableWidget, *, show_stack_count_column: bool = False):
+    """Apply Follow-up / main table column layout to any QTableWidget."""
+    table.setColumnCount(len(FITS_TABLE_HEADERS))
+    table.setHorizontalHeaderLabels(FITS_TABLE_HEADERS)
+    table.setColumnHidden(FITS_TABLE_COUNT_COLUMN, not show_stack_count_column)
+    header = table.horizontalHeader()
+    for i in range(len(FITS_TABLE_HEADERS)):
+        header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+    for i, width in enumerate(FITS_TABLE_COLUMN_WIDTHS):
+        table.setColumnWidth(i, width)
+
+
+def add_fits_file_to_table_row(table: QTableWidget, row: int, fits_file):
+    """Populate one row with the same cells as MainFitsTableWidget (Follow-up view)."""
+    filename = os.path.basename(fits_file.path)
+    filename_item = QTableWidgetItem(filename)
+    filename_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    filename_item.setToolTip(fits_file.path)
+    filename_item.setData(Qt.ItemDataRole.UserRole, fits_file.path)
+    table.setItem(row, 0, filename_item)
+    if fits_file.date_obs:
+        dt_disp = to_display_time(fits_file.date_obs)
+        date_str = dt_disp.strftime("%Y-%m-%d %H:%M:%S") if dt_disp else "-"
+    else:
+        date_str = "-"
+    date_item = QTableWidgetItem(date_str)
+    date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 1, date_item)
+    target_item = QTableWidgetItem(fits_file.target or "-")
+    target_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 2, target_item)
+    filter_name = fits_file.filter_name or "-"
+    filter_item = QTableWidgetItem(filter_name)
+    filter_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    filter_name_upper = filter_name.upper()
+    if filter_name_upper == "R":
+        filter_item.setForeground(QColor(220, 30, 30))
+    elif filter_name_upper == "G":
+        filter_item.setForeground(QColor(30, 180, 30))
+    elif filter_name_upper == "B":
+        filter_item.setForeground(QColor(30, 80, 220))
+    table.setItem(row, 3, filter_item)
+    sc = getattr(fits_file, "stack_frame_count", None)
+    count_item = QTableWidgetItem(str(sc) if sc is not None else "-")
+    count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 4, count_item)
+    exposure_str = f"{fits_file.exptime:.1f}s" if fits_file.exptime else "-"
+    exposure_item = QTableWidgetItem(exposure_str)
+    exposure_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 5, exposure_item)
+    binning_item = QTableWidgetItem(fits_file.binning or "-")
+    binning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 6, binning_item)
+    gain_str = f"{fits_file.gain:.1f}" if fits_file.gain else "-"
+    gain_item = QTableWidgetItem(gain_str)
+    gain_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 7, gain_item)
+    offset_str = f"{fits_file.offset:.1f}" if fits_file.offset else "-"
+    offset_item = QTableWidgetItem(offset_str)
+    offset_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 8, offset_item)
+    temp_str = f"{fits_file.ccd_temp:.1f}°C" if fits_file.ccd_temp else "-"
+    temp_item = QTableWidgetItem(temp_str)
+    temp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 9, temp_item)
+    focus_item = QTableWidgetItem(
+        str(int(fits_file.focus_position)) if fits_file.focus_position is not None else "-"
+    )
+    focus_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 10, focus_item)
+    if fits_file.size_x and fits_file.size_y:
+        size_str = f"{fits_file.size_x} × {fits_file.size_y}"
+    else:
+        size_str = "-"
+    size_item = QTableWidgetItem(size_str)
+    size_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 11, size_item)
+    scale_str = f'{fits_file.image_scale:.2f}"' if fits_file.image_scale else "-"
+    scale_item = QTableWidgetItem(scale_str)
+    scale_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 12, scale_item)
+    if fits_file.ra_center:
+        ra_hours = fits_file.ra_center / 15.0
+        ra_h = int(ra_hours)
+        ra_m = int((ra_hours - ra_h) * 60)
+        ra_s = (ra_hours - ra_h - ra_m / 60) * 3600
+        ra_str = f"{ra_h:02d}:{ra_m:02d}:{ra_s:05.2f}"
+    else:
+        ra_str = "-"
+    ra_item = QTableWidgetItem(ra_str)
+    ra_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 13, ra_item)
+    if fits_file.dec_center:
+        dec_deg = fits_file.dec_center
+        dec_sign = "+" if dec_deg >= 0 else "-"
+        dec_deg_abs = abs(dec_deg)
+        dec_d = int(dec_deg_abs)
+        dec_m = int((dec_deg_abs - dec_d) * 60)
+        dec_s = (dec_deg_abs - dec_d - dec_m / 60) * 3600
+        dec_str = f"{dec_sign}{dec_d:02d}:{dec_m:02d}:{dec_s:04.1f}"
+    else:
+        dec_str = "-"
+    dec_item = QTableWidgetItem(dec_str)
+    dec_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 14, dec_item)
+    wcs_item = QTableWidgetItem(fits_file.wcs_type or "-")
+    wcs_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    table.setItem(row, 15, wcs_item)
+
+
+def apply_fits_table_striping(table: QTableWidget):
+    """Zebra striping matching MainFitsTableWidget."""
+    palette = table.palette()
+    base_color = palette.color(table.backgroundRole())
+    is_dark = base_color.value() < 128 if hasattr(base_color, "value") else False
+    color1 = QColor(40, 40, 40) if is_dark else QColor(255, 255, 255)
+    color2 = QColor(55, 55, 55) if is_dark else QColor(245, 245, 245)
+    for row in range(table.rowCount()):
+        color = color2 if row % 2 == 1 else color1
+        for col in range(table.columnCount()):
+            cell = table.item(row, col)
+            if cell:
+                cell.setBackground(color)
+                if is_dark and cell.foreground().color() == QColor():
+                    cell.setForeground(QColor(230, 230, 230))
+
+
 def launch_viewer(fits_paths):
     """
     Launch the FITS viewer with the correct Python executable and working directory.
@@ -64,7 +213,7 @@ class MainFitsTableWidget(QTableWidget):
     platesolving_completed = pyqtSignal()
     database_refresh_requested = pyqtSignal()  # New signal for database refresh
 
-    COUNT_COLUMN = 4  # stack frame count; visible only in Follow-up target view
+    COUNT_COLUMN = FITS_TABLE_COUNT_COLUMN
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,12 +222,8 @@ class MainFitsTableWidget(QTableWidget):
         self.init_table()
 
     def init_table(self):
-        self.setColumnCount(16)
-        self.setHorizontalHeaderLabels([
-            "Filename", "Date obs", "Target", "Filter", "Count", "Exposure", "Bin", "Gain", "Offset", "CCD temp", "Focus", "Size", "Image Scale", "RA Center", "DEC Center", "WCS Type"
-        ])
-        # self.verticalHeader().setVisible(False)  # Remove this line to show the vertical header
-        self.verticalHeader().setVisible(True)     # Show the vertical header
+        configure_fits_table_widget(self, show_stack_count_column=False)
+        self.verticalHeader().setVisible(True)
         self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
         self.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -87,26 +232,6 @@ class MainFitsTableWidget(QTableWidget):
         self.setSortingEnabled(True)
         self.setShowGrid(True)
         self.setGridStyle(Qt.PenStyle.SolidLine)
-        header = self.horizontalHeader()
-        for i in range(self.columnCount()):
-            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
-        self.setColumnWidth(0, 200)   # Filename
-        self.setColumnWidth(1, 140)   # Date obs
-        self.setColumnWidth(2, 100)   # Target
-        self.setColumnWidth(3, 50)    # Filter
-        self.setColumnWidth(4, 52)    # Count (stack frames)
-        self.setColumnWidth(5, 80)    # Exposure
-        self.setColumnWidth(6, 60)    # Bin
-        self.setColumnWidth(7, 60)    # Gain
-        self.setColumnWidth(8, 60)    # Offset
-        self.setColumnWidth(9, 80)    # CCD temp
-        self.setColumnWidth(10, 60)   # Focus
-        self.setColumnWidth(11, 80)   # Size
-        self.setColumnWidth(12, 80)   # Image Scale
-        self.setColumnWidth(13, 100)  # RA Center
-        self.setColumnWidth(14, 100)  # DEC Center
-        self.setColumnWidth(15, 80)   # WCS Type
-        self.setColumnHidden(self.COUNT_COLUMN, True)
         self.itemSelectionChanged.connect(self._on_selection_changed)
 
     def populate_table(self, fits_files, show_stack_count_column=False):
@@ -121,154 +246,21 @@ class MainFitsTableWidget(QTableWidget):
         self.setRowCount(len(sorted_files))
         self.verticalHeader().setDefaultSectionSize(30)
         for row, fits_file in enumerate(sorted_files):
-            self._add_file_row(row, fits_file)
+            add_fits_file_to_table_row(self, row, fits_file)
+            item = self.item(row, 0)
+            if item:
+                item.setData(
+                    Qt.ItemDataRole.UserRole,
+                    {"fits_file": fits_file, "is_file": True},
+                )
         # Set vertical header labels to row numbers (1-based)
         self.setVerticalHeaderLabels([str(i+1) for i in range(len(sorted_files))])
-        self._apply_striping()
+        apply_fits_table_striping(self)
         self.sortItems(1, Qt.SortOrder.DescendingOrder)
         self.blockSignals(False)
 
-    def _add_file_row(self, row, fits_file):
-        filename = os.path.basename(fits_file.path)
-        filename_item = QTableWidgetItem(filename)
-        filename_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        filename_item.setToolTip(fits_file.path)
-        filename_item.setData(Qt.ItemDataRole.UserRole, {'fits_file': fits_file, 'is_file': True})
-        self.setItem(row, 0, filename_item)
-        # Date obs
-        if fits_file.date_obs:
-            dt_disp = to_display_time(fits_file.date_obs)
-            date_str = dt_disp.strftime('%Y-%m-%d %H:%M:%S') if dt_disp else "-"
-        else:
-            date_str = "-"
-        date_item = QTableWidgetItem(date_str)
-        date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 1, date_item)
-        # Target
-        target = fits_file.target or "-"
-        target_item = QTableWidgetItem(target)
-        target_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 2, target_item)
-        filter_name = fits_file.filter_name or "-"
-        filter_item = QTableWidgetItem(filter_name)
-        filter_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Set color based on filter
-        if filter_name.upper() == 'R':
-            filter_item.setForeground(QColor(220, 30, 30))  # Red
-        elif filter_name.upper() == 'G':
-            filter_item.setForeground(QColor(30, 180, 30))  # Green
-        elif filter_name.upper() == 'B':
-            filter_item.setForeground(QColor(30, 80, 220))  # Blue
-        # L or others: leave as default (white/system)
-        self.setItem(row, 3, filter_item)
-        sc = getattr(fits_file, "stack_frame_count", None)
-        count_str = str(sc) if sc is not None else "-"
-        count_item = QTableWidgetItem(count_str)
-        count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 4, count_item)
-        if fits_file.exptime:
-            exposure_str = f"{fits_file.exptime:.1f}s"
-        else:
-            exposure_str = "-"
-        exposure_item = QTableWidgetItem(exposure_str)
-        exposure_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 5, exposure_item)
-        binning = fits_file.binning or "-"
-        binning_item = QTableWidgetItem(binning)
-        binning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 6, binning_item)
-        if fits_file.gain:
-            gain_str = f"{fits_file.gain:.1f}"
-        else:
-            gain_str = "-"
-        gain_item = QTableWidgetItem(gain_str)
-        gain_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 7, gain_item)
-        if fits_file.offset:
-            offset_str = f"{fits_file.offset:.1f}"
-        else:
-            offset_str = "-"
-        offset_item = QTableWidgetItem(offset_str)
-        offset_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 8, offset_item)
-        if fits_file.ccd_temp:
-            temp_str = f"{fits_file.ccd_temp:.1f}°C"
-        else:
-            temp_str = "-"
-        temp_item = QTableWidgetItem(temp_str)
-        temp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 9, temp_item)
-        focus_item = QTableWidgetItem(str(int(fits_file.focus_position)) if fits_file.focus_position is not None else "-")
-        focus_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 10, focus_item)
-        if fits_file.size_x and fits_file.size_y:
-            size_str = f"{fits_file.size_x} × {fits_file.size_y}"
-        else:
-            size_str = "-"
-        size_item = QTableWidgetItem(size_str)
-        size_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 11, size_item)
-        if fits_file.image_scale:
-            scale_str = f"{fits_file.image_scale:.2f}\""
-        else:
-            scale_str = "-"
-        scale_item = QTableWidgetItem(scale_str)
-        scale_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 12, scale_item)
-        if fits_file.ra_center:
-            ra_hours = fits_file.ra_center / 15.0
-            ra_h = int(ra_hours)
-            ra_m = int((ra_hours - ra_h) * 60)
-            ra_s = ((ra_hours - ra_h - ra_m/60) * 3600)
-            ra_str = f"{ra_h:02d}:{ra_m:02d}:{ra_s:05.2f}"
-        else:
-            ra_str = "-"
-        ra_item = QTableWidgetItem(ra_str)
-        ra_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 13, ra_item)
-        if fits_file.dec_center:
-            dec_deg = fits_file.dec_center
-            dec_sign = "+" if dec_deg >= 0 else "-"
-            dec_deg_abs = abs(dec_deg)
-            dec_d = int(dec_deg_abs)
-            dec_m = int((dec_deg_abs - dec_d) * 60)
-            dec_s = ((dec_deg_abs - dec_d - dec_m/60) * 3600)
-            dec_str = f"{dec_sign}{dec_d:02d}:{dec_m:02d}:{dec_s:04.1f}"
-        else:
-            dec_str = "-"
-        dec_item = QTableWidgetItem(dec_str)
-        dec_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 14, dec_item)
-        wcs_type = fits_file.wcs_type or "-"
-        wcs_item = QTableWidgetItem(wcs_type)
-        wcs_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setItem(row, 15, wcs_item)
-
-        # Set foreground color for the filter cell only
-        filter_name_upper = (fits_file.filter_name or "").upper()
-        if filter_name_upper == 'R':
-            filter_item.setForeground(QColor(220, 30, 30))  # Red
-        elif filter_name_upper == 'G':
-            filter_item.setForeground(QColor(30, 180, 30))  # Green
-        elif filter_name_upper == 'B':
-            filter_item.setForeground(QColor(30, 80, 220))  # Blue
-        # L or others: leave as default (white/system)
-
     def _apply_striping(self):
-        palette = self.palette()
-        base_color = palette.color(self.backgroundRole())
-        is_dark = base_color.value() < 128 if hasattr(base_color, 'value') else False
-        color1 = QColor(40, 40, 40) if is_dark else QColor(255, 255, 255)
-        color2 = QColor(55, 55, 55) if is_dark else QColor(245, 245, 245)
-        for row in range(self.rowCount()):
-            color = color2 if row % 2 == 1 else color1
-            for col in range(self.columnCount()):
-                cell = self.item(row, col)
-                if cell:
-                    cell.setBackground(color)
-                    # Only set foreground if not already colored (i.e., default brush)
-                    if is_dark and cell.foreground().color() == QColor():
-                        cell.setForeground(QColor(230, 230, 230))
+        apply_fits_table_striping(self)
 
     def _on_selection_changed(self):
         selected_indexes = self.selectedIndexes()

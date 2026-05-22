@@ -27,8 +27,9 @@ class ImageLabel(QLabel):
         self.pan_timer.setInterval(16)
         self.target_scroll_pos = QPoint()
         self._custom_cross_cursor = self._create_cross_cursor()
-        # --- Zoom to region state ---
+        # --- Rectangle drag (zoom or define ROI) ---
         self._zoom_region_mode = False
+        self._define_roi_mode = False
         self._zoom_region_start = None  # QPoint
         self._zoom_region_end = None    # QPoint
         self._zoom_region_active = False
@@ -62,20 +63,37 @@ class ImageLabel(QLabel):
 
     def set_zoom_region_mode(self, enabled):
         self._zoom_region_mode = enabled
+        if enabled:
+            self._define_roi_mode = False
         if not enabled:
-            self._zoom_region_start = None
-            self._zoom_region_end = None
-            self._zoom_region_active = False
-            self.update()
+            self._clear_rect_drag()
+        self.update()
+
+    def set_define_roi_mode(self, enabled):
+        self._define_roi_mode = enabled
+        if enabled:
+            self._zoom_region_mode = False
+        if not enabled:
+            self._clear_rect_drag()
+        self.update()
 
     def clear_zoom_region_rect(self):
+        self._clear_rect_drag()
+
+    def clear_define_roi_rect(self):
+        self._clear_rect_drag()
+
+    def _clear_rect_drag(self):
         self._zoom_region_start = None
         self._zoom_region_end = None
         self._zoom_region_active = False
         self.update()
 
+    def _rect_drag_active(self):
+        return self._zoom_region_mode or self._define_roi_mode
+
     def mousePressEvent(self, event: QMouseEvent):
-        if self._zoom_region_mode and event.button() == Qt.MouseButton.LeftButton:
+        if self._rect_drag_active() and event.button() == Qt.MouseButton.LeftButton:
             self._zoom_region_start = event.pos()
             self._zoom_region_end = event.pos()
             self._zoom_region_active = True
@@ -103,7 +121,7 @@ class ImageLabel(QLabel):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        if self._zoom_region_mode and self._zoom_region_active:
+        if self._rect_drag_active() and self._zoom_region_active:
             self._zoom_region_end = event.pos()
             self.update()
             return
@@ -206,15 +224,17 @@ class ImageLabel(QLabel):
                 self.parent_viewer.status_pixel_label.setText("--")
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        if self._zoom_region_mode and self._zoom_region_active and event.button() == Qt.MouseButton.LeftButton:
+        if self._rect_drag_active() and self._zoom_region_active and event.button() == Qt.MouseButton.LeftButton:
             self._zoom_region_end = event.pos()
             self._zoom_region_active = False
             self.setCursor(self._custom_cross_cursor)
-            # Convert the selection rectangle to image coordinates and call parent
             rect = self._get_zoom_region_rect()
             if rect is not None and self.parent_viewer is not None:
                 (img_x0, img_y0), (img_x1, img_y1) = rect
-                self.parent_viewer.zoom_to_region(img_x0, img_y0, img_x1, img_y1)
+                if self._define_roi_mode and hasattr(self.parent_viewer, "on_roi_region_selected"):
+                    self.parent_viewer.on_roi_region_selected(img_x0, img_y0, img_x1, img_y1)
+                else:
+                    self.parent_viewer.zoom_to_region(img_x0, img_y0, img_x1, img_y1)
             self._zoom_region_start = None
             self._zoom_region_end = None
             self.update()
@@ -580,10 +600,11 @@ class ImageLabel(QLabel):
                 painter.end()
             except Exception as e:
                 pass
-        # Draw zoom region rectangle if active or if selection exists
-        if self._zoom_region_mode and (self._zoom_region_active or (self._zoom_region_start and self._zoom_region_end)):
+        # Draw rectangle selection (zoom or ROI)
+        if self._rect_drag_active() and (self._zoom_region_active or (self._zoom_region_start and self._zoom_region_end)):
             painter = QPainter(self)
-            pen = QPen(QColor(0, 180, 255), 2, Qt.PenStyle.DashLine)
+            color = QColor(80, 220, 120) if self._define_roi_mode else QColor(0, 180, 255)
+            pen = QPen(color, 2, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             start = self._zoom_region_start
             end = self._zoom_region_end

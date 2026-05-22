@@ -42,6 +42,7 @@ class ToolbarController:
         self.reset_zoom_action = None
         self.zoom_to_fit_action = None
         self.zoom_region_action = None
+        self.define_roi_action = None
         self.simbad_button = None
         self.sso_button = None
         self.calibrate_button = None
@@ -282,7 +283,17 @@ class ToolbarController:
         self.zoom_region_action.toggled.connect(self.parent.on_zoom_region_toggled)
         self.toolbar.addAction(self.zoom_region_action)
         self.toolbar.widgetForAction(self.zoom_region_action).setFixedSize(32, 32)
-    
+
+        self.define_roi_action = QAction(QIcon.fromTheme("draw-rectangle"), "", self.parent)
+        self.define_roi_action.setCheckable(True)
+        self.define_roi_action.setChecked(False)
+        self.define_roi_action.setToolTip(
+            "Define region of interest (draw rectangle on platesolved image)"
+        )
+        self.define_roi_action.toggled.connect(self.parent.on_define_roi_toggled)
+        self.toolbar.addAction(self.define_roi_action)
+        self.toolbar.widgetForAction(self.define_roi_action).setFixedSize(32, 32)
+
     def _create_histogram_controls(self):
         """Create histogram-related controls."""
         # Add separator before histogram controls
@@ -593,7 +604,8 @@ class ToolbarController:
         self.reset_zoom_action.setEnabled(False)
         self.zoom_to_fit_action.setEnabled(False)
         self.zoom_region_action.setEnabled(False)
-        
+        self.define_roi_action.setEnabled(False)
+
         # Disable histogram controls
         self.linear_action.setEnabled(False)
         self.log_action.setEnabled(False)
@@ -622,7 +634,8 @@ class ToolbarController:
         self.reset_zoom_action.setEnabled(True)
         self.zoom_to_fit_action.setEnabled(True)
         self.zoom_region_action.setEnabled(True)
-        
+        self.define_roi_action.setEnabled(True)
+
         # Enable histogram controls
         self.linear_action.setEnabled(True)
         self.log_action.setEnabled(True)

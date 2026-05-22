@@ -9,6 +9,7 @@ def create_menu_bar(
     on_refresh=None,
     on_cleanup=None,
     on_generate_session_stacks=None,
+    on_generate_region_views=None,
 ):
     """Create the menu bar with File, Database, and Actions menus, and connect actions to callbacks."""
     menubar = parent.menuBar() if hasattr(parent, 'menuBar') else QMenuBar(parent)
@@ -39,10 +40,16 @@ def create_menu_bar(
         cleanup_action.triggered.connect(on_cleanup)
         db_menu.addAction(cleanup_action)
 
-    if on_generate_session_stacks is not None:
+    actions_menu = None
+    if on_generate_session_stacks is not None or on_generate_region_views is not None:
         actions_menu = menubar.addMenu("Actions")
+    if actions_menu is not None and on_generate_session_stacks is not None:
         gen_session = QAction("Generate session stacks", parent)
         gen_session.triggered.connect(on_generate_session_stacks)
         actions_menu.addAction(gen_session)
+    if actions_menu is not None and on_generate_region_views is not None:
+        gen_views = QAction("Generate all Region of interest views", parent)
+        gen_views.triggered.connect(on_generate_region_views)
+        actions_menu.addAction(gen_views)
 
     return menubar 

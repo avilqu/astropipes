@@ -43,6 +43,17 @@ def stacks_path_for_target(target_name: str) -> Path:
     return Path(STACKS_PATH) / data_path_target_folder_name(target_name)
 
 
+def views_path_for_target(target_name: str) -> Path:
+    """Directory for region-of-interest PNG views for this target."""
+    return stacks_path_for_target(target_name) / "views"
+
+
+def region_views_path_for_region(target_name: str, region_name: str) -> Path:
+    """Directory for PNGs of a named region under STACKS_PATH/<target>/views/<region>/."""
+    safe_region = str(region_name).replace(" ", "_").replace(os.sep, "_")
+    return views_path_for_target(target_name) / safe_region
+
+
 def path_indicates_session_stack(file_path: str) -> bool:
     """
     True if this filesystem path is a session-stack location: legacy .../Stacks/... tree
@@ -56,10 +67,16 @@ def path_indicates_session_stack(file_path: str) -> bool:
             return True
         sp = Path(STACKS_PATH).resolve()
         try:
-            return p.is_relative_to(sp)
+            under_stacks = p.is_relative_to(sp)
         except AttributeError:
             # Python < 3.9
-            return str(p).startswith(str(sp) + os.sep) or p == sp
+            under_stacks = str(p).startswith(str(sp) + os.sep) or p == sp
+        if not under_stacks:
+            return False
+        # PNG views and other non-stack assets under .../views/ are not session stacks
+        if "views" in p.parts:
+            return False
+        return True
     except (ValueError, OSError):
         return False
 

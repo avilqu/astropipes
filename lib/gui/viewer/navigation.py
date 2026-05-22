@@ -378,6 +378,12 @@ class NavigationMixin:
 
     def on_zoom_region_toggled(self, checked):
         """Handle zoom region mode toggle."""
+        if checked and getattr(self, "define_roi_action", None):
+            self.define_roi_action.blockSignals(True)
+            self.define_roi_action.setChecked(False)
+            self.define_roi_action.blockSignals(False)
+            if hasattr(self, "on_define_roi_toggled"):
+                self.on_define_roi_toggled(False)
         self._zoom_region_mode = checked
         self.image_label.set_zoom_region_mode(checked)
         if not checked:

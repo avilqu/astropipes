@@ -1,3 +1,5 @@
+import os
+
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -9,9 +11,10 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QDialog,
     QSizePolicy,
+    QMenu,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QFont, QBrush, QColor
+from PyQt6.QtGui import QFont, QBrush, QColor, QAction
 from lib.db import get_db_manager
 from lib.db.edit import rename_target_across_database
 from lib.gui.library.context_dropdown import build_sidebar_target_menu, build_sidebar_date_menu
@@ -27,9 +30,13 @@ from lib.gui.library.follow_up_filter_dialog import FollowUpFilterDialog
 class LeftPanel(QWidget):
     menu_selection_changed = pyqtSignal(str, str)  # (category, value)
     target_renamed = pyqtSignal(str, str)  # (old_name, new_name)
+    region_deleted = pyqtSignal(int)  # region id removed from database
+    region_renamed = pyqtSignal(int, str)  # region id, new name
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # region_id -> stack count in field (filled after user opens a region; session-only)
+        self._region_stack_counts: dict[int, int] = {}
         layout = QVBoxLayout(self)
         self.menu_tree = QTreeWidget()
         self.menu_tree.setHeaderHidden(True)
@@ -66,10 +73,12 @@ class LeftPanel(QWidget):
         self.targets_item = QTreeWidgetItem(["Targets"])
         self.followup_item = QTreeWidgetItem(["Follow-up"])
         self.dates_item = QTreeWidgetItem(["Dates"])
+        self.regions_item = QTreeWidgetItem(["Regions"])
         self.menu_tree.addTopLevelItem(self.obslog_item)
         self.menu_tree.addTopLevelItem(self.targets_item)
         self.menu_tree.addTopLevelItem(self.followup_item)
         self.menu_tree.addTopLevelItem(self.dates_item)
+        self.menu_tree.addTopLevelItem(self.regions_item)
 
         # Set bold font for expandable items
         bold_font = QFont()
@@ -78,6 +87,7 @@ class LeftPanel(QWidget):
         self.obslog_item.setFont(0, bold_font)
         self.followup_item.setFont(0, bold_font)
         self.dates_item.setFont(0, bold_font)
+        self.regions_item.setFont(0, bold_font)
         
         # Create darker brush for child items (used before calibration section)
         self.darker_brush = QBrush(QColor("#bbbbbb"))
@@ -106,7 +116,6 @@ class LeftPanel(QWidget):
         self.calibration_item.addChild(self.darks_item)
         self.calibration_item.addChild(self.flats_item)
         self.menu_tree.addTopLevelItem(self.calibration_item)
-        self.menu_tree.expandItem(self.calibration_item)
 
         # Populate targets and dates immediately (ordered by last image taken)
         for target in db.get_unique_targets_by_last_image():
@@ -133,16 +142,30 @@ class LeftPanel(QWidget):
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])
                 item.setForeground(0, self.darker_brush)
 
-        # Expand Targets, Follow-up, Dates, and Obs log by default
-        self.menu_tree.expandItem(self.targets_item)
-        self.menu_tree.expandItem(self.followup_item)
-        self.menu_tree.expandItem(self.dates_item)
+        self._repopulate_regions_children()
+
+        # Only Obs log expanded by default; other categories stay collapsed
         self.menu_tree.expandItem(self.obslog_item)
 
         layout.addWidget(self.menu_tree)
         self.setMinimumWidth(200)
 
         self.menu_tree.currentItemChanged.connect(self._emit_selection)
+
+    def _region_item_label(self, region_name: str, region_id: int) -> str:
+        count = self._region_stack_counts.get(region_id)
+        if count is None:
+            return region_name
+        return f"{region_name} ({count})"
+
+    def set_region_stack_count(self, region_id: int, count: int, region_name: str):
+        """Cache stack-in-field count and refresh the sidebar row label."""
+        self._region_stack_counts[region_id] = count
+        for i in range(self.regions_item.childCount()):
+            child = self.regions_item.child(i)
+            if child.data(0, Qt.ItemDataRole.UserRole) == region_id:
+                child.setText(0, self._region_item_label(region_name, region_id))
+                break
 
     def _follow_up_badge_widget(self, label_text: str) -> QWidget:
         """Small blue ``F`` to the left of ``Target (#)``. Narrow width + negative inset so the row matches plain target items."""
@@ -208,6 +231,16 @@ class LeftPanel(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, target)
             item.setForeground(0, self.darker_brush)
 
+    def _repopulate_regions_children(self):
+        """Refresh Regions subtree from the database."""
+        self.regions_item.takeChildren()
+        db = get_db_manager()
+        for region in db.get_all_regions():
+            label = self._region_item_label(region.name, region.id)
+            item = QTreeWidgetItem(self.regions_item, [label])
+            item.setData(0, Qt.ItemDataRole.UserRole, region.id)
+            item.setForeground(0, self.darker_brush)
+
     def _emit_selection(self, current, previous):
         if current is self.obslog_item:
             # Don't emit for parent item, just expand/collapse
@@ -238,6 +271,12 @@ class LeftPanel(QWidget):
             date_text = current.text(0)
             date_name = date_text.split(" (")[0]
             self.menu_selection_changed.emit("date", date_name)
+        elif current.parent() is self.regions_item:
+            region_id = current.data(0, Qt.ItemDataRole.UserRole)
+            if region_id is not None:
+                self.menu_selection_changed.emit("region", str(region_id))
+        elif current is self.regions_item:
+            self.menu_selection_changed.emit("regions", "")
         elif current is self.darks_item:
             self.menu_selection_changed.emit("darks", "")
         elif current is self.bias_item:
@@ -643,6 +682,78 @@ class LeftPanel(QWidget):
                 remove_follow_up_callback=remove_follow_up if flagged else None,
             )
             menu.exec(self.menu_tree.viewport().mapToGlobal(pos))
+        elif item and item.parent() is self.regions_item:
+            region_id = item.data(0, Qt.ItemDataRole.UserRole)
+            if region_id is None:
+                return
+            db = get_db_manager()
+            region = db.get_region_by_id(region_id)
+            if not region:
+                return
+
+            def rename_region():
+                new_name, ok = QInputDialog.getText(
+                    self,
+                    "Rename region",
+                    f"New name for region '{region.name}' (target {region.target}):",
+                    text=region.name,
+                )
+                if not ok:
+                    return
+                new_name = new_name.strip()
+                if not new_name or new_name == region.name:
+                    return
+                try:
+                    db.rename_region(region_id, new_name)
+                except ValueError as e:
+                    QMessageBox.warning(self, "Rename region", str(e))
+                    return
+                count = self._region_stack_counts.get(region_id)
+                self._repopulate_regions_children()
+                if count is not None:
+                    self.set_region_stack_count(region_id, count, new_name)
+                for i in range(self.regions_item.childCount()):
+                    child = self.regions_item.child(i)
+                    if child.data(0, Qt.ItemDataRole.UserRole) == region_id:
+                        self.menu_tree.setCurrentItem(child)
+                        break
+                self.region_renamed.emit(region_id, new_name)
+
+            def delete_region():
+                reply = QMessageBox.question(
+                    self,
+                    "Delete region",
+                    f"Delete region '{region.name}' for target '{region.target}'?\n\n"
+                    "This removes the region from the database and deletes "
+                    "associated PNG views on disk.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+                views = db.get_region_views(region_id)
+                for view in views:
+                    png = view.png_path
+                    if png and os.path.isfile(png):
+                        try:
+                            os.remove(png)
+                        except OSError:
+                            pass
+                if not db.delete_region(region_id):
+                    QMessageBox.warning(self, "Delete region", "Region could not be deleted.")
+                    return
+                self._region_stack_counts.pop(region_id, None)
+                self._repopulate_regions_children()
+                self.region_deleted.emit(region_id)
+
+            menu = QMenu(self.menu_tree)
+            rename_action = QAction("Rename region…", menu)
+            rename_action.triggered.connect(rename_region)
+            menu.addAction(rename_action)
+            delete_action = QAction("Delete region…", menu)
+            delete_action.triggered.connect(delete_region)
+            menu.addAction(delete_action)
+            menu.exec(self.menu_tree.viewport().mapToGlobal(pos))
         elif item and item.parent() is self.dates_item:
             # This is a date item
             date_text = item.text(0)
@@ -748,6 +859,7 @@ class LeftPanel(QWidget):
                 item, target, count, db.follow_up_is_flagged(target)
             )
         self._repopulate_follow_up_children()
+        self._repopulate_regions_children()
         # Repopulate dates
         if TIME_DISPLAY_MODE == 'Local':
             for date in reversed(db.get_unique_local_dates()):
@@ -759,8 +871,7 @@ class LeftPanel(QWidget):
                 count = db.get_file_count_by_date(date)
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])
                 item.setForeground(0, self.darker_brush)
-        # Expand Targets, Follow-up, Dates, and Obs log by default
-        self.menu_tree.expandItem(self.targets_item)
-        self.menu_tree.expandItem(self.followup_item)
-        self.menu_tree.expandItem(self.dates_item)
-        self.menu_tree.expandItem(self.obslog_item)
+
+    def repopulate_regions(self):
+        """Refresh only the Regions sidebar section."""
+        self._repopulate_regions_children()

@@ -22,6 +22,7 @@ from .main_table import MainFitsTableWidget
 from .sidebar import LeftPanel
 from .calibration_tables import MasterDarksTableWidget, MasterBiasTableWidget, MasterFlatsTableWidget
 from .mpc_log_table import MPCLogTableWidget
+from .region_detail import RegionDetailWidget
 from lib.db import get_db_manager
 from lib.db.models import CalibrationMaster
 from lib.gui.library.menu_bar import create_menu_bar
@@ -387,6 +388,7 @@ class AstroLibraryGUI(QMainWindow):
             self.refresh_database,
             self.cleanup_temp_directories,
             self.generate_session_stacks,
+            self.generate_region_views,
         )
         
         # Create central widget
@@ -414,12 +416,14 @@ class AstroLibraryGUI(QMainWindow):
         self.master_bias_table = MasterBiasTableWidget()
         self.master_flats_table = MasterFlatsTableWidget()
         self.mpc_log_table = MPCLogTableWidget()
+        self.region_detail_widget = RegionDetailWidget()
         self.right_stack.addWidget(self.table_widget)  # index 0: Runs (obs log)
         self.right_stack.addWidget(self.main_table_widget)  # index 1: Main table (targets/dates)
         self.right_stack.addWidget(self.master_darks_table)  # index 2: Master darks
         self.right_stack.addWidget(self.master_bias_table)   # index 3: Master bias
         self.right_stack.addWidget(self.master_flats_table)  # index 4: Master flats
         self.right_stack.addWidget(self.mpc_log_table)  # index 5: MPC Log
+        self.right_stack.addWidget(self.region_detail_widget)  # index 6: Region detail
         splitter.addWidget(self.right_stack)
         splitter.setStretchFactor(1, 1)  # Make right panel expand more
         splitter.setSizes([self.left_panel.minimumWidth(), 1000])  # Left panel at min width
@@ -465,6 +469,8 @@ class AstroLibraryGUI(QMainWindow):
         # Menu selection
         self.left_panel.menu_selection_changed.connect(self.on_menu_selection_changed)
         self.left_panel.target_renamed.connect(lambda old, new: self.load_database())
+        self.left_panel.region_deleted.connect(self._on_region_deleted)
+        self.left_panel.region_renamed.connect(self._on_region_renamed)
     
     def setup_database_watcher(self):
         """Set up a file system watcher to monitor the database file for changes."""
@@ -536,6 +542,7 @@ class AstroLibraryGUI(QMainWindow):
         if n > 0:
             self.status_label.setText(f"   Added {n} new file(s)")
         self.left_panel.repopulate_targets_and_dates()
+        self.left_panel.repopulate_regions()
         self.load_database()
         self.update_status_bar()
 
@@ -579,6 +586,7 @@ class AstroLibraryGUI(QMainWindow):
         self.table_widget.populate_table(fits_files)
         # Refresh the sidebar to reflect new counts
         self.left_panel.repopulate_targets_and_dates()
+        self.left_panel.repopulate_regions()
         # If main_table_widget is visible, repopulate it with the correct filter
         if self.right_stack.currentIndex() == 1:
             if self.last_menu_category == "target":
@@ -608,6 +616,11 @@ class AstroLibraryGUI(QMainWindow):
                         if f.date_obs and f.date_obs.strftime('%Y-%m-%d') == self.last_menu_value
                     ]
                 self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
+        elif self.right_stack.currentIndex() == 6 and self.last_menu_category == "region":
+            region = get_db_manager().get_region_by_id(int(self.last_menu_value))
+            if region:
+                n = self.region_detail_widget.populate(region, self._session_stack_files())
+                self.left_panel.set_region_stack_count(region.id, n, region.name)
         self.update_status_bar()
         self.progress_bar.setVisible(False)
         QTimer.singleShot(250, self._release_db_file_watcher)
@@ -622,6 +635,33 @@ class AstroLibraryGUI(QMainWindow):
     def _release_db_file_watcher(self):
         """Re-enable QFileSystemWatcher for the DB after load finishes (avoids refresh loops with WAL)."""
         self._suppress_db_file_watcher = False
+
+    def _session_stack_files(self):
+        """All session stacks in the loaded library (for region detail / overlap checks)."""
+        return [f for f in self.fits_files if config.is_session_stack_fits_file(f)]
+
+    def _on_region_deleted(self, region_id: int):
+        """Clear region detail panel when the selected region was removed."""
+        if (
+            self.last_menu_category == "region"
+            and self.last_menu_value == str(region_id)
+        ):
+            self.region_detail_widget.populate(None, [])
+            self.last_menu_category = None
+            self.last_menu_value = None
+
+    def _on_region_renamed(self, region_id: int, _new_name: str):
+        """Refresh region detail when the open region was renamed."""
+        if (
+            self.last_menu_category == "region"
+            and self.last_menu_value == str(region_id)
+        ):
+            db = get_db_manager()
+            region = db.get_region_by_id(region_id)
+            if region:
+                self.region_detail_widget.populate(region, self._session_stack_files())
+            else:
+                self.region_detail_widget.populate(None, [])
     
     def on_table_selection_changed(self, fits_file_ids):
         """Handle table selection changes."""
@@ -674,6 +714,15 @@ class AstroLibraryGUI(QMainWindow):
                 ]
             self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
             self.right_stack.setCurrentIndex(1)
+        elif category == "region":
+            db = get_db_manager()
+            region = db.get_region_by_id(int(value))
+            if region:
+                n = self.region_detail_widget.populate(region, self._session_stack_files())
+                self.left_panel.set_region_stack_count(region.id, n, region.name)
+            else:
+                self.region_detail_widget.populate(None, [])
+            self.right_stack.setCurrentIndex(6)
         elif category == "darks":
             db = get_db_manager()
             session = db.get_session()
@@ -741,6 +790,7 @@ class AstroLibraryGUI(QMainWindow):
                 msg += f"\nFirst error: {errors[0]}"
         QMessageBox.information(self, "Scan Complete", msg)
         self.left_panel.repopulate_targets_and_dates()
+        self.left_panel.repopulate_regions()
         self.load_database()  # Refresh the table
     
     def on_scan_error(self, error_message):
@@ -762,6 +812,7 @@ class AstroLibraryGUI(QMainWindow):
         if self.data_folder_watcher is not None and getattr(config, 'DATA_FOLDER_WATCH_ENABLED', True):
             self.data_folder_watcher.set_paths([config.DATA_PATH, config.CALIBRATION_PATH])
         self.left_panel.repopulate_targets_and_dates()
+        self.left_panel.repopulate_regions()
         self.load_database()
 
     def update_status_bar(self):
@@ -851,6 +902,60 @@ class AstroLibraryGUI(QMainWindow):
         self._session_stacks_thread.finished.connect(on_finished)
         cw.cancel_requested.connect(self._session_stacks_thread.stop)
         self._session_stacks_thread.start()
+
+    def generate_region_views(self):
+        """Generate PNG crops for every ROI on every session stack in the field."""
+        from lib.gui.library.region_views_thread import RegionViewsBatchThread
+
+        db = get_db_manager()
+        if not db.get_all_regions():
+            QMessageBox.information(
+                self,
+                "No regions",
+                "Define at least one region of interest in the FITS viewer first.",
+            )
+            return
+        if getattr(self, "_region_views_thread", None) and self._region_views_thread.isRunning():
+            QMessageBox.warning(self, "Busy", "Region view generation is already running.")
+            return
+        cw = ConsoleOutputWindow("Generate region views", self)
+        cw.clear_output()
+        cw.show_and_raise()
+        self._region_views_thread = RegionViewsBatchThread()
+        self._region_views_thread.output.connect(cw.append_text)
+
+        def on_finished(res):
+            cw.append_text("\n— Finished —\n")
+            cw.close_button.setEnabled(True)
+            self.left_panel.repopulate_regions()
+            if self.last_menu_category == "region" and self.last_menu_value:
+                region = get_db_manager().get_region_by_id(int(self.last_menu_value))
+                if region:
+                    n = self.region_detail_widget.populate(region, self._session_stack_files())
+                    self.left_panel.set_region_stack_count(region.id, n, region.name)
+            gen = res.get("generated", 0)
+            skip = res.get("skipped", 0)
+            errs = res.get("errors") or []
+            if res.get("cancelled"):
+                QMessageBox.information(self, "Cancelled", "Region view generation was cancelled.")
+            elif res.get("error"):
+                QMessageBox.warning(self, "Region views", str(res.get("error")))
+            elif errs:
+                QMessageBox.warning(
+                    self,
+                    "Region views",
+                    f"Done: {gen} created, {skip} skipped, {len(errs)} error(s). See console.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Region views",
+                    f"Generated {gen} PNG(s), skipped {skip} existing.",
+                )
+
+        self._region_views_thread.finished.connect(on_finished)
+        cw.cancel_requested.connect(self._region_views_thread.stop)
+        self._region_views_thread.start()
 
     def cleanup_temp_directories(self):
         """Delete work files under PROCESSED_PATH (solved, calibrated, stacked, aligned, substacks, session_stacks_work)."""

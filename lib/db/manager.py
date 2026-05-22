@@ -4,7 +4,17 @@ from sqlalchemy import create_engine, event, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import NullPool
-from .models import Base, FitsFile, Source, CalibrationMaster, Run, MPCLog, FollowUpFilter
+from .models import (
+    Base,
+    FitsFile,
+    Source,
+    CalibrationMaster,
+    Run,
+    MPCLog,
+    FollowUpFilter,
+    RegionOfInterest,
+    RegionView,
+)
 from config import to_display_time
 
 class DatabaseManager:
@@ -115,6 +125,13 @@ class DatabaseManager:
                     conn.execute(text("ALTER TABLE fits_files ADD COLUMN stack_frame_count INTEGER"))
                     conn.commit()
                 print("Added 'stack_frame_count' column to 'fits_files' table")
+
+        if 'regions_of_interest' not in existing_tables:
+            RegionOfInterest.__table__.create(self.engine, checkfirst=True)
+            print("Created 'regions_of_interest' table")
+        if 'region_views' not in existing_tables:
+            RegionView.__table__.create(self.engine, checkfirst=True)
+            print("Created 'region_views' table")
     
     def get_session(self) -> Session:
         """Get a new database session.
@@ -523,6 +540,193 @@ class DatabaseManager:
         try:
             n = session.query(FollowUpFilter).filter(FollowUpFilter.target_name == target_name).count()
             return n > 0
+        finally:
+            session.close()
+
+    def add_region_of_interest(
+        self,
+        name: str,
+        target: str,
+        ra_min: float,
+        ra_max: float,
+        dec_min: float,
+        dec_max: float,
+        defined_from_path: str = None,
+        created_at=None,
+    ) -> RegionOfInterest:
+        from datetime import datetime
+
+        session = self.get_session()
+        try:
+            region = RegionOfInterest(
+                name=name,
+                target=target,
+                ra_min=ra_min,
+                ra_max=ra_max,
+                dec_min=dec_min,
+                dec_max=dec_max,
+                defined_from_path=defined_from_path,
+                created_at=created_at or datetime.utcnow(),
+            )
+            session.add(region)
+            session.commit()
+            session.refresh(region)
+            return region
+        except SQLAlchemyError as e:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_all_regions(self) -> list:
+        session = self.get_session()
+        try:
+            return (
+                session.query(RegionOfInterest)
+                .order_by(RegionOfInterest.target, RegionOfInterest.name)
+                .all()
+            )
+        finally:
+            session.close()
+
+    def get_region_by_id(self, region_id: int):
+        session = self.get_session()
+        try:
+            return session.query(RegionOfInterest).filter(RegionOfInterest.id == region_id).first()
+        finally:
+            session.close()
+
+    def delete_region(self, region_id: int) -> bool:
+        session = self.get_session()
+        try:
+            region = session.query(RegionOfInterest).filter(RegionOfInterest.id == region_id).first()
+            if not region:
+                return False
+            session.delete(region)
+            session.commit()
+            return True
+        except SQLAlchemyError:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def rename_region(self, region_id: int, new_name: str) -> RegionOfInterest:
+        from lib.fits.region_views import relocate_region_views_directory
+
+        new_name = (new_name or "").strip()
+        if not new_name:
+            raise ValueError("Region name cannot be empty.")
+        session = self.get_session()
+        try:
+            region = (
+                session.query(RegionOfInterest)
+                .filter(RegionOfInterest.id == region_id)
+                .first()
+            )
+            if not region:
+                raise ValueError("Region not found.")
+            old_name = region.name
+            if old_name == new_name:
+                return region
+            conflict = (
+                session.query(RegionOfInterest)
+                .filter(
+                    RegionOfInterest.target == region.target,
+                    RegionOfInterest.name == new_name,
+                    RegionOfInterest.id != region_id,
+                )
+                .first()
+            )
+            if conflict:
+                raise ValueError(
+                    f"A region named '{new_name}' already exists for target '{region.target}'."
+                )
+            views = (
+                session.query(RegionView)
+                .filter(RegionView.region_id == region_id)
+                .all()
+            )
+            relocate_region_views_directory(region.target, old_name, new_name, views)
+            region.name = new_name
+            session.commit()
+            session.refresh(region)
+            return region
+        except SQLAlchemyError as e:
+            session.rollback()
+            raise ValueError(f"Could not rename region: {e}") from e
+        finally:
+            session.close()
+
+    def add_or_update_region_view(
+        self,
+        region_id: int,
+        stack_fits_path: str,
+        png_path: str,
+        date_obs=None,
+        display_min=None,
+        display_max=None,
+    ) -> RegionView:
+        session = self.get_session()
+        try:
+            existing = (
+                session.query(RegionView)
+                .filter(
+                    RegionView.region_id == region_id,
+                    RegionView.stack_fits_path == stack_fits_path,
+                )
+                .first()
+            )
+            if existing:
+                existing.png_path = png_path
+                existing.date_obs = date_obs
+                existing.display_min = display_min
+                existing.display_max = display_max
+                session.commit()
+                session.refresh(existing)
+                return existing
+            view = RegionView(
+                region_id=region_id,
+                stack_fits_path=stack_fits_path,
+                png_path=png_path,
+                date_obs=date_obs,
+                display_min=display_min,
+                display_max=display_max,
+            )
+            session.add(view)
+            session.commit()
+            session.refresh(view)
+            return view
+        except SQLAlchemyError:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_region_views(self, region_id: int) -> list:
+        session = self.get_session()
+        try:
+            return (
+                session.query(RegionView)
+                .filter(RegionView.region_id == region_id)
+                .order_by(RegionView.date_obs.desc())
+                .all()
+            )
+        finally:
+            session.close()
+
+    def delete_region_view(self, view_id: int) -> bool:
+        session = self.get_session()
+        try:
+            view = session.query(RegionView).filter(RegionView.id == view_id).first()
+            if not view:
+                return False
+            session.delete(view)
+            session.commit()
+            return True
+        except SQLAlchemyError:
+            session.rollback()
+            raise
         finally:
             session.close()
 
