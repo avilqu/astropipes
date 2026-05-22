@@ -600,6 +600,45 @@ class ImageLabel(QLabel):
                 painter.end()
             except Exception as e:
                 pass
+        # Draw regions of interest in field
+        if (
+            self.parent_viewer
+            and hasattr(self.parent_viewer, "_roi_field_overlay")
+            and self.parent_viewer._roi_field_overlay
+            and getattr(self.parent_viewer, "_overlay_visible", True)
+            and hasattr(self.parent_viewer, "overlay_toolbar_controller")
+            and self.parent_viewer.overlay_toolbar_controller.is_roi_field_visible()
+        ):
+            try:
+                pixmap = self.pixmap()
+                if pixmap is None or self.parent_viewer.image_data is None:
+                    return
+                img_h, img_w = self.parent_viewer.image_data.shape
+                pixmap_w = pixmap.width()
+                pixmap_h = pixmap.height()
+                label_w = self.width()
+                label_h = self.height()
+                scale = pixmap_w / img_w
+                x_offset = (label_w - pixmap_w) / 2.0
+                y_offset = (label_h - pixmap_h) / 2.0
+                names = []
+                rects_disp = []
+                for name, (x0, y0, x1, y1) in self.parent_viewer._roi_field_overlay:
+                    names.append(name)
+                    rects_disp.append(
+                        (
+                            x0 * scale + x_offset,
+                            y0 * scale + y_offset,
+                            x1 * scale + x_offset,
+                            y1 * scale + y_offset,
+                        )
+                    )
+                overlay = RegionFieldOverlay(names, rects_disp)
+                painter = QPainter(self)
+                overlay.draw(painter)
+                painter.end()
+            except Exception:
+                pass
         # Draw rectangle selection (zoom or ROI)
         if self._rect_drag_active() and (self._zoom_region_active or (self._zoom_region_start and self._zoom_region_end)):
             painter = QPainter(self)
@@ -1019,6 +1058,32 @@ class SSOOverlay:
             text_x = int(x + self.radius + 4)
             text_y = int(y + 4)
             painter.drawText(text_x, text_y, obj.name)
+
+
+class RegionFieldOverlay:
+    """Overlay for saved regions of interest that overlap the current image field."""
+
+    def __init__(self, regions, pixel_rects, color=QColor(80, 220, 120)):
+        self.regions = regions  # list of region names
+        self.pixel_rects = pixel_rects  # list of (x0, y0, x1, y1) display coordinates
+        self.color = color
+
+    def draw(self, painter: QPainter):
+        font = QFont()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        pen = QPen(self.color)
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for name, (x0, y0, x1, y1) in zip(self.regions, self.pixel_rects):
+            rx = int(min(x0, x1))
+            ry = int(min(y0, y1))
+            rw = int(abs(x1 - x0))
+            rh = int(abs(y1 - y0))
+            painter.drawRect(rx, ry, rw, rh)
+            painter.drawText(rx + 4, ry + 14, name)
 
 
 class SIMBADFieldOverlay:

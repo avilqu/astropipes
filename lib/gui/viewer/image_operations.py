@@ -282,6 +282,8 @@ class ImageOperationsMixin:
         # Remove overlays before aligning
         self._simbad_overlay = None
         self._simbad_field_overlay = None
+        self._roi_field_overlay = None
+        self._roi_field_overlay_active = False
         self._overlay_visible = True
         if hasattr(self, 'overlay_toolbar_controller'):
             self.overlay_toolbar_controller.update_overlay_button_visibility()

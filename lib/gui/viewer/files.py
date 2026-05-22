@@ -66,6 +66,8 @@ class FileOperationsMixin:
             # Clear any overlays
             self._simbad_overlay = None
             self._simbad_field_overlay = None
+            self._roi_field_overlay = None
+            self._roi_field_overlay_active = False
             self._sso_overlay = None
             self._ephemeris_overlay = None
             self._measurement_overlay = None
@@ -204,6 +206,8 @@ class FileOperationsMixin:
             # Clear any overlays
             self._simbad_overlay = None
             self._simbad_field_overlay = None
+            self._roi_field_overlay = None
+            self._roi_field_overlay_active = False
             self._sso_overlay = None
             self._ephemeris_overlay = None
             self._measurement_overlay = None
@@ -475,6 +479,9 @@ class FileOperationsMixin:
         
         # After loading, update measurement marker if present
         self.update_measurement_marker()
+
+        if hasattr(self, "refresh_roi_field_overlay"):
+            self.refresh_roi_field_overlay()
 
     def _get_header_value(self, key, default=None):
         """Helper method to extract header values from (value, comment) tuples."""

@@ -43,6 +43,7 @@ class ToolbarController:
         self.zoom_to_fit_action = None
         self.zoom_region_action = None
         self.define_roi_action = None
+        self.roi_button = None
         self.simbad_button = None
         self.sso_button = None
         self.calibrate_button = None
@@ -284,16 +285,6 @@ class ToolbarController:
         self.toolbar.addAction(self.zoom_region_action)
         self.toolbar.widgetForAction(self.zoom_region_action).setFixedSize(32, 32)
 
-        self.define_roi_action = QAction(QIcon.fromTheme("draw-rectangle"), "", self.parent)
-        self.define_roi_action.setCheckable(True)
-        self.define_roi_action.setChecked(False)
-        self.define_roi_action.setToolTip(
-            "Define region of interest (draw rectangle on platesolved image)"
-        )
-        self.define_roi_action.toggled.connect(self.parent.on_define_roi_toggled)
-        self.toolbar.addAction(self.define_roi_action)
-        self.toolbar.widgetForAction(self.define_roi_action).setFixedSize(32, 32)
-
     def _create_histogram_controls(self):
         """Create histogram-related controls."""
         # Add separator before histogram controls
@@ -435,6 +426,8 @@ class ToolbarController:
         self.sso_button.setMenu(sso_menu)
         self.sso_button.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
         self.toolbar.addWidget(self.sso_button)
+
+        self._create_roi_control()
     
     def _create_processing_controls(self):
         """Create image processing controls (calibrate, platesolve, header)."""        
@@ -575,6 +568,46 @@ class ToolbarController:
         self.filelist_action.triggered.connect(self.parent.toggle_filelist_window)
         self.toolbar.addAction(self.filelist_action)
         self.toolbar.widgetForAction(self.filelist_action).setFixedSize(32, 32)
+
+    def _create_roi_control(self):
+        """Regions of interest dropdown after the Solar System button."""
+        roi_icon = QIcon.fromTheme("draw-rectangle")
+        if roi_icon.isNull():
+            roi_icon = QIcon.fromTheme("select-rectangular")
+
+        self.define_roi_action = QAction(self.parent)
+        self.define_roi_action.setCheckable(True)
+        self.define_roi_action.setChecked(False)
+        self.define_roi_action.toggled.connect(self.parent.on_define_roi_toggled)
+
+        self.roi_button = QToolButton(self.parent)
+        self.roi_button.setIcon(roi_icon)
+        self.roi_button.setToolTip("Regions of interest")
+        self.roi_button.setCheckable(True)
+        self.roi_button.setEnabled(False)
+        self.roi_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.roi_button.setFixedSize(32, 32)
+
+        roi_menu = QMenu(self.roi_button)
+        define_action = QAction("Define new region", self.parent)
+        define_action.triggered.connect(self._toggle_define_roi_mode)
+        roi_menu.addAction(define_action)
+
+        show_field_action = QAction("Show regions in field", self.parent)
+        show_field_action.triggered.connect(self.parent.show_regions_in_field)
+        roi_menu.addAction(show_field_action)
+
+        self.roi_button.setMenu(roi_menu)
+        self.roi_button.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+        self.define_roi_action.toggled.connect(self._sync_roi_button_checked)
+        self.toolbar.addWidget(self.roi_button)
+
+    def _toggle_define_roi_mode(self):
+        """Toggle define-ROI draw mode (same as the former toolbar button)."""
+        self.define_roi_action.setChecked(not self.define_roi_action.isChecked())
+
+    def _sync_roi_button_checked(self, checked):
+        self.roi_button.setChecked(checked)
     
     def update_navigation_buttons(self):
         """Update navigation button visibility based on number of loaded files."""
@@ -605,6 +638,7 @@ class ToolbarController:
         self.zoom_to_fit_action.setEnabled(False)
         self.zoom_region_action.setEnabled(False)
         self.define_roi_action.setEnabled(False)
+        self.roi_button.setEnabled(False)
 
         # Disable histogram controls
         self.linear_action.setEnabled(False)
@@ -635,6 +669,7 @@ class ToolbarController:
         self.zoom_to_fit_action.setEnabled(True)
         self.zoom_region_action.setEnabled(True)
         self.define_roi_action.setEnabled(True)
+        self.roi_button.setEnabled(True)
 
         # Enable histogram controls
         self.linear_action.setEnabled(True)

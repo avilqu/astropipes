@@ -71,13 +71,13 @@ class LeftPanel(QWidget):
         # Top-level items
         self.obslog_item = QTreeWidgetItem(["Obs log"])
         self.targets_item = QTreeWidgetItem(["Targets"])
-        self.followup_item = QTreeWidgetItem(["Follow-up"])
+        self.followup_item = QTreeWidgetItem(["Stacks"])
         self.dates_item = QTreeWidgetItem(["Dates"])
         self.regions_item = QTreeWidgetItem(["Regions"])
         self.menu_tree.addTopLevelItem(self.obslog_item)
         self.menu_tree.addTopLevelItem(self.targets_item)
-        self.menu_tree.addTopLevelItem(self.followup_item)
         self.menu_tree.addTopLevelItem(self.dates_item)
+        self.menu_tree.addTopLevelItem(self.followup_item)
         self.menu_tree.addTopLevelItem(self.regions_item)
 
         # Set bold font for expandable items
@@ -235,7 +235,7 @@ class LeftPanel(QWidget):
         """Refresh Regions subtree from the database."""
         self.regions_item.takeChildren()
         db = get_db_manager()
-        for region in db.get_all_regions():
+        for region in sorted(db.get_all_regions(), key=lambda r: r.name.lower()):
             label = self._region_item_label(region.name, region.id)
             item = QTreeWidgetItem(self.regions_item, [label])
             item.setData(0, Qt.ItemDataRole.UserRole, region.id)

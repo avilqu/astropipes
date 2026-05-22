@@ -110,6 +110,21 @@ def _pixel_corners_for_region(wcs: WCS, region: SkyRegion, shape: Tuple[int, int
     return np.column_stack([px, py])
 
 
+def pixel_bbox_for_region(
+    wcs: WCS,
+    region: SkyRegion,
+    shape: Tuple[int, int],
+) -> Optional[Tuple[float, float, float, float]]:
+    """Return (x0, y0, x1, y1) image pixel bounds for a sky region, or None if off-image."""
+    corners = _pixel_corners_for_region(wcs, region, shape)
+    if corners is None:
+        return None
+    xs, ys = corners[:, 0], corners[:, 1]
+    if np.any(np.isnan(xs)) or np.any(np.isnan(ys)):
+        return None
+    return float(np.min(xs)), float(np.min(ys)), float(np.max(xs)), float(np.max(ys))
+
+
 def region_in_image_field(
     fits_path: str,
     region: SkyRegion,

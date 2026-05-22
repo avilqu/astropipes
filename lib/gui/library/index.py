@@ -389,6 +389,7 @@ class AstroLibraryGUI(QMainWindow):
             self.cleanup_temp_directories,
             self.generate_session_stacks,
             self.generate_region_views,
+            self.latest_regions_update,
         )
         
         # Create central widget
@@ -956,6 +957,41 @@ class AstroLibraryGUI(QMainWindow):
         self._region_views_thread.finished.connect(on_finished)
         cw.cancel_requested.connect(self._region_views_thread.stop)
         self._region_views_thread.start()
+
+    def latest_regions_update(self):
+        """Copy oldest and newest region-view PNGs for the latest observing session."""
+        from lib.gui.library.latest_regions_update_thread import LatestRegionsUpdateThread
+
+        if getattr(self, "_latest_regions_thread", None) and self._latest_regions_thread.isRunning():
+            QMessageBox.warning(self, "Busy", "Latest regions update is already running.")
+            return
+        cw = ConsoleOutputWindow("Latest regions update", self)
+        cw.clear_output()
+        cw.show_and_raise()
+        self._latest_regions_thread = LatestRegionsUpdateThread()
+        self._latest_regions_thread.output.connect(cw.append_text)
+
+        def on_finished(res):
+            cw.append_text("\n— Finished —\n")
+            cw.close_button.setEnabled(True)
+            if res.get("error"):
+                QMessageBox.warning(self, "Latest regions update", str(res.get("error")))
+            elif res.get("errors"):
+                QMessageBox.warning(
+                    self,
+                    "Latest regions update",
+                    f"Copied {res.get('copied', 0)} file(s) with {len(res['errors'])} error(s). See console.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Latest regions update",
+                    f"Copied {res.get('copied', 0)} PNG(s) to\n{res.get('dest_dir')}\n"
+                    f"(session {res.get('session_date')}).",
+                )
+
+        self._latest_regions_thread.finished.connect(on_finished)
+        self._latest_regions_thread.start()
 
     def cleanup_temp_directories(self):
         """Delete work files under PROCESSED_PATH (solved, calibrated, stacked, aligned, substacks, session_stacks_work)."""

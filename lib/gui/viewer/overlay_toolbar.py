@@ -23,6 +23,7 @@ class OverlayToolbarController:
         self.simbad_toggle_action = None
         self.gaia_toggle_action = None
         self.gaia_detection_toggle_action = None
+        self.roi_field_toggle_action = None
         
         # Overlay visibility states (separate from global overlay visibility)
         self._ephemeris_visible = True
@@ -31,6 +32,7 @@ class OverlayToolbarController:
         self._simbad_visible = True
         self._gaia_visible = True
         self._gaia_detection_visible = True
+        self._roi_field_visible = True
         
         # Create the toolbar
         self._create_toolbar()
@@ -153,6 +155,17 @@ class OverlayToolbarController:
         self.gaia_detection_toggle_action.triggered.connect(self._toggle_gaia_detection_overlay)
         self.toolbar.addAction(self.gaia_detection_toggle_action)
         self.toolbar.widgetForAction(self.gaia_detection_toggle_action).setFixedSize(32, 32)
+
+        roi_icon = QIcon.fromTheme("draw-rectangle")
+        if roi_icon.isNull():
+            roi_icon = QIcon.fromTheme("select-rectangular")
+        self.roi_field_toggle_action = QAction(roi_icon, "Toggle field regions", self.parent)
+        self.roi_field_toggle_action.setCheckable(True)
+        self.roi_field_toggle_action.setChecked(True)
+        self.roi_field_toggle_action.setToolTip("Show/hide regions of interest in field")
+        self.roi_field_toggle_action.triggered.connect(self._toggle_roi_field_overlay)
+        self.toolbar.addAction(self.roi_field_toggle_action)
+        self.toolbar.widgetForAction(self.roi_field_toggle_action).setFixedSize(32, 32)
     
     def _toggle_ephemeris_overlay(self):
         """Toggle ephemeris overlay visibility."""
@@ -182,6 +195,11 @@ class OverlayToolbarController:
     def _toggle_gaia_detection_overlay(self):
         """Toggle Gaia detection overlay visibility."""
         self._gaia_detection_visible = not self._gaia_detection_visible
+        self.parent.image_label.update()
+
+    def _toggle_roi_field_overlay(self):
+        """Toggle field regions of interest overlay visibility."""
+        self._roi_field_visible = not self._roi_field_visible
         self.parent.image_label.update()
     
     def update_overlay_button_visibility(self):
@@ -232,6 +250,14 @@ class OverlayToolbarController:
         self.gaia_detection_toggle_action.setVisible(has_gaia_detection)
         if has_gaia_detection:
             self.gaia_detection_toggle_action.setChecked(self._gaia_detection_visible)
+
+        has_roi_field = (
+            hasattr(self.parent, "_roi_field_overlay")
+            and self.parent._roi_field_overlay is not None
+        )
+        self.roi_field_toggle_action.setVisible(has_roi_field)
+        if has_roi_field:
+            self.roi_field_toggle_action.setChecked(self._roi_field_visible)
     
     def is_ephemeris_visible(self):
         """Check if ephemeris overlay should be visible."""
@@ -255,4 +281,8 @@ class OverlayToolbarController:
 
     def is_gaia_detection_visible(self):
         """Check if Gaia detection overlay should be visible."""
-        return self._gaia_detection_visible and getattr(self.parent, '_overlay_visible', True) 
+        return self._gaia_detection_visible and getattr(self.parent, '_overlay_visible', True)
+
+    def is_roi_field_visible(self):
+        """Check if field regions of interest overlay should be visible."""
+        return self._roi_field_visible and getattr(self.parent, "_overlay_visible", True)

@@ -136,6 +136,8 @@ class FITSViewer(
         self._source_overlay = None  # Store source overlay data
         self._zoom_region_mode = False  # Track if zoom-to-region is active
         self._define_roi_mode = False
+        self._roi_field_overlay = None
+        self._roi_field_overlay_active = False
         self._pending_zoom_rect = None  # Store the last selected rectangle
         self._computed_positions_overlay = None  # Store computed positions overlay data
         if fits_path:
