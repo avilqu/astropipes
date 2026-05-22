@@ -438,14 +438,13 @@ class FileOperationsMixin:
                     else:
                         self._zoom = 1.0
                     self._pending_zoom_to_fit = False
-                    self.update_image_display(keep_zoom=restore_view)
                     self.image_label.setText("")
                     self.setWindowTitle(f"Astropipes FITS Viewer - {fits_path}")
                     self.header_button.setEnabled(True)
                     
                     # Enable all image-dependent buttons
                     self.update_button_states_for_image_loaded()
-                    # Initialize histogram parameters for the new image
+                    # Stretch before display so the first paint uses correct limits
                     self.histogram_controller.initialize_for_new_image(restore_view)
                 else:
                     self.image_label.setText("FITS file is not a 2D image.")
