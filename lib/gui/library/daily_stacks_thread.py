@@ -170,6 +170,33 @@ def _alignment_ref_raw_from_existing_stacks(stack_paths):
     return None
 
 
+def resolve_alignment_reference_raw(
+    files,
+    *,
+    existing_stack_paths=None,
+    override_raw_path=None,
+):
+    """
+    Pick one raw light path for ALIGNREF (shared across filters when stacking a target).
+
+    Priority: explicit override, ALIGNREF on existing stacks, earliest date_obs in files.
+    """
+    if override_raw_path:
+        p = _norm_path_str(override_raw_path)
+        if p and Path(p).is_file():
+            return p
+    ref = _alignment_ref_raw_from_existing_stacks(existing_stack_paths)
+    if ref:
+        return ref
+    dated = sorted(
+        [f for f in files if getattr(f, "date_obs", None)],
+        key=lambda f: f.date_obs,
+    )
+    if dated and getattr(dated[0], "path", None):
+        return _norm_path_str(dated[0].path)
+    return None
+
+
 def generate_daily_stacks_impl(
     target_name,
     files,
@@ -182,6 +209,7 @@ def generate_daily_stacks_impl(
     aligned_output_dir=None,
     skip_existing_stack_paths=None,
     stack_filename_include_session_index=True,
+    alignment_reference_raw_path=None,
 ):
     """
     Core daily/session stack generation.
@@ -199,9 +227,11 @@ def generate_daily_stacks_impl(
     names are stack_<target>_<filter>_<YYYYMMDD>.fits; duplicate nights on the same run
     get _2, _3, etc. before .fits.
 
-    Alignment reference raw: read from ALIGNREF on any path in skip_existing_stack_paths
-    (existing stacks); otherwise the earliest date_obs light in the batch. All stacks and
-    aligned intermediates store ALIGNREF as that raw file's absolute path.
+    alignment_reference_raw_path: if set, force this raw FITS as the alignment reference
+    (used for cross-filter session stacks). Otherwise resolve via resolve_alignment_reference_raw
+    from skip_existing_stack_paths and earliest date_obs in files.
+
+    All stacks and aligned intermediates store ALIGNREF as that raw file's absolute path.
     """
     if not files:
         return {'error': 'No files found for target', 'success': False}
@@ -290,9 +320,11 @@ def generate_daily_stacks_impl(
 
     sorted_files = sorted(files_to_process, key=lambda f: f.date_obs or datetime.min)
 
-    ref_raw = _alignment_ref_raw_from_existing_stacks(skip_existing_stack_paths)
-    if not ref_raw and sorted_files:
-        ref_raw = _norm_path_str(sorted_files[0].path)
+    ref_raw = resolve_alignment_reference_raw(
+        files,
+        existing_stack_paths=skip_existing_stack_paths,
+        override_raw_path=alignment_reference_raw_path,
+    )
     align_ref_str = _norm_path_str(ref_raw) if ref_raw else None
 
     job_path_norms = {_norm_path_str(p) for p in files_to_process_paths if p}
@@ -538,6 +570,7 @@ def generate_daily_stacks_impl(
         'stacks_generated': len(stack_paths),
         'stacks_skipped_existing': skipped_existing,
         'stack_paths': stack_paths,
+        'alignment_reference_raw_path': align_ref_str,
     }
 
 

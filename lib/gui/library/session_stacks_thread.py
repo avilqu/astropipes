@@ -8,7 +8,11 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import config
 from lib.db import get_db_manager
 from lib.db.scan import FitsFileScanner
-from lib.gui.library.daily_stacks_thread import generate_daily_stacks_impl, log_console_step_banner
+from lib.gui.library.daily_stacks_thread import (
+    generate_daily_stacks_impl,
+    log_console_step_banner,
+    resolve_alignment_reference_raw,
+)
 from lib.sci.platesolving import solve_single_image
 
 
@@ -52,6 +56,14 @@ class SessionStacksBatchThread(QThread):
             existing_stack_paths = {
                 f.path for f in files_all if config.is_session_stack_fits_file(f) and f.path
             }
+            target_align_ref = resolve_alignment_reference_raw(
+                raw_files,
+                existing_stack_paths=existing_stack_paths,
+            )
+            if target_align_ref:
+                self.output.emit(
+                    f"\nTarget alignment reference (all filters): {target_align_ref}\n"
+                )
             for fn in filter_names:
                 if self._cancel:
                     break
@@ -84,6 +96,7 @@ class SessionStacksBatchThread(QThread):
                     aligned_output_dir=str(aligned_dir),
                     skip_existing_stack_paths=existing_stack_paths,
                     stack_filename_include_session_index=False,
+                    alignment_reference_raw_path=target_align_ref,
                 )
                 if not res.get("success"):
                     err = res.get("error", "unknown error")
@@ -95,7 +108,11 @@ class SessionStacksBatchThread(QThread):
                     self.output.emit(
                         f"  ↷ Skipped {skipped_existing} stack(s) already present in database\n"
                     )
+                ref_from_run = res.get("alignment_reference_raw_path")
+                if ref_from_run:
+                    target_align_ref = ref_from_run
                 for p in res.get("stack_paths", []):
+                    existing_stack_paths.add(p)
                     if self._cancel:
                         break
                     path = Path(p)
