@@ -45,7 +45,7 @@ MAX_ALIGNMENT_IMAGES = 50
 
 # Memory management settings for image alignment
 # These settings help prevent memory crashes during alignment
-ALIGNMENT_MEMORY_LIMIT = 4e9  # 4GB memory limit for alignment (in bytes)
+ALIGNMENT_MEMORY_LIMIT = 4e9  # Memory limit for alignment (in bytes)
 ALIGNMENT_CHUNK_SIZE = 10     # Number of images to process in each chunk
 ALIGNMENT_ENABLE_CHUNKED = True  # Enable chunked processing for large datasets
 ALIGNMENT_SAVE_PROGRESSIVE = True  # Save aligned images progressively instead of all at once
@@ -58,7 +58,7 @@ SIGMA_HIGH = 3
 
 # Memory management settings for image integration
 # These settings help prevent memory crashes when processing large numbers of files
-INTEGRATION_MEMORY_LIMIT = 6e9  # 6GB memory limit for integration (in bytes)
+INTEGRATION_MEMORY_LIMIT = 6e9  # Memory limit for integration (in bytes)
 INTEGRATION_CHUNK_SIZE = 15     # Number of images to process in each chunk
 INTEGRATION_ENABLE_CHUNKED = True  # Enable chunked processing for large datasets
 INTEGRATION_SAVE_PROGRESSIVE = True  # Save integrated images progressively instead of all at once
@@ -78,9 +78,9 @@ FLAT_CONSTRAINTS = ['FILTER', 'XBINNING']
 
 # Maximum age (in days) for calibration masters. If set to 0, no age limit is applied.
 # These control how old a calibration master can be relative to the science frame.
-MAX_BIAS_AGE = 0   # No age limit for bias frames by default
-MAX_DARK_AGE = 0   # No age limit for dark frames by default  
-MAX_FLAT_AGE = 0  # Flat frames older than 30 days are not considered by default
+MAX_BIAS_AGE = 0
+MAX_DARK_AGE = 0
+MAX_FLAT_AGE = 0
 
 # Header cards used for the sequence consistency tests and header
 # summary display. Script will issue an error if testing a card
