@@ -19,7 +19,12 @@ import lib.legacy.helpers as hlp
 
 
 write_path = Path(f'{os.getcwd()}/calibrated')
-write_path.mkdir(exist_ok=True)
+
+
+def calibrated_file_path(filename):
+    ''' Path for a calibrated file in write_path, creating the folder on first write. '''
+    write_path.mkdir(exist_ok=True)
+    return write_path / filename
 
 
 class Calibrator:
@@ -70,7 +75,7 @@ class Calibrator:
 
         print(f'Writing {cfg.CALIBRATION_PATH}/{filename}...')
         stack.write(f'{cfg.CALIBRATION_PATH}/{filename}', overwrite=True)
-        shutil.rmtree(f'{os.getcwd()}/calibrated/')
+        shutil.rmtree(write_path, ignore_errors=True)
 
         return True
 
@@ -104,7 +109,7 @@ class Calibrator:
 
             new_filename = f'b_{filename}'
             print(f'-- Writing {write_path/new_filename}...')
-            calibrated_image.write(write_path / new_filename, overwrite=True)
+            calibrated_image.write(calibrated_file_path(new_filename), overwrite=True)
 
         calibrated_files = []
         for file in glob.glob(f'{write_path}/*.fits'):
@@ -128,7 +133,7 @@ class Calibrator:
 
         print(f'Writing {cfg.CALIBRATION_PATH}/{filename}...')
         stack.write(f'{cfg.CALIBRATION_PATH}/{filename}', overwrite=True)
-        shutil.rmtree(f'{os.getcwd()}/calibrated/')
+        shutil.rmtree(write_path, ignore_errors=True)
 
         return True
 
@@ -171,7 +176,7 @@ class Calibrator:
 
             new_filename = f'b_d_{filename}'
             print(f'-- Writing {write_path/new_filename}...')
-            calibrated_image.write(write_path / new_filename, overwrite=True)
+            calibrated_image.write(calibrated_file_path(new_filename), overwrite=True)
 
         calibrated_files = []
         for file in glob.glob(f'{write_path}/*.fits'):
@@ -196,7 +201,7 @@ class Calibrator:
 
         print(f'Writing {cfg.CALIBRATION_PATH}/{filename}...')
         stack.write(f'{cfg.CALIBRATION_PATH}/{filename}', overwrite=True)
-        shutil.rmtree(f'{os.getcwd()}/calibrated/')
+        shutil.rmtree(write_path, ignore_errors=True)
 
         return True
 
@@ -275,7 +280,7 @@ class Calibrator:
         if write:
             new_filename = f'b_{filename}'
             print(f'-- Writing {write_path/new_filename}...')
-            calibrated_image.write(write_path / new_filename, overwrite=True)
+            calibrated_image.write(calibrated_file_path(new_filename), overwrite=True)
 
         calibrated_image.data = calibrated_image.data.astype('float32')
         return calibrated_image
@@ -309,7 +314,7 @@ class Calibrator:
         if write:
             new_filename = f'd_{filename}'
             print(f'-- Writing {write_path/new_filename}...')
-            calibrated_image.write(write_path / new_filename, overwrite=True)
+            calibrated_image.write(calibrated_file_path(new_filename), overwrite=True)
 
         calibrated_image.data = calibrated_image.data.astype('float32')
         return calibrated_image
@@ -342,7 +347,7 @@ class Calibrator:
         if write:
             new_filename = f'f_{filename}'
             print(f'-- Writing {write_path/new_filename}...')
-            calibrated_image.write(write_path / new_filename, overwrite=True)
+            calibrated_image.write(calibrated_file_path(new_filename), overwrite=True)
 
         calibrated_image.data = calibrated_image.data.astype('float32')
         return calibrated_image
@@ -404,7 +409,7 @@ class Calibrator:
             print('-- Nothing to write')
         elif write and hasattr(calibrated_image, 'write'):
             print(f'-- Writing {write_path/new_filename}...')
-            calibrated_image.write(write_path / new_filename, overwrite=True)
+            calibrated_image.write(calibrated_file_path(new_filename), overwrite=True)
             if original_path is not None:
                 print(f'-- Restoring WCS header from {original_path}...')
                 import time
