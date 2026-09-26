@@ -17,7 +17,7 @@ from lib.gui.library.main_table import MainFitsTableWidget
 from lib.gui.library.context_dropdown import build_calibration_single_file_menu, build_empty_menu
 from lib.gui.library.platesolving_thread import PlatesolvingThread
 from lib.db.models import CalibrationMaster
-from config import to_display_time
+from lib.time_display import to_display_time
 
 def launch_viewer(fits_paths):
     """

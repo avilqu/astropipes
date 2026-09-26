@@ -15,7 +15,8 @@ from .models import (
     RegionOfInterest,
     RegionView,
 )
-from config import to_display_time
+from lib import paths
+from lib.time_display import to_display_time
 
 class DatabaseManager:
     """Manages database connections and operations for astro-pipelines."""
@@ -798,17 +799,13 @@ class DatabaseManager:
             stack_rows = [
                 r
                 for r in session.query(FitsFile).filter(FitsFile.target == target).all()
-                if config.is_session_stack_fits_file(r)
+                if paths.is_session_stack_fits_file(r)
             ]
             for row in stack_rows:
                 session.delete(row)
                 results['files_removed'] += 1
-            stacks_path = config.stacks_path_for_target(target)
-            legacy_stacks_path = (
-                Path(config.DATA_PATH)
-                / config.data_path_target_folder_name(target)
-                / config.SESSION_STACK_FILTER_NAME
-            )
+            stacks_path = paths.stacks_path_for_target(target)
+            legacy_stacks_path = paths.legacy_stacks_path_for_target(target)
             session.commit()
             for tree in (stacks_path, legacy_stacks_path):
                 if tree.exists():

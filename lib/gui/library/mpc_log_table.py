@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QAction
 from lib.db import get_db_manager
 from lib.db.models import MPCLog
-from config import to_display_time
+from lib.time_display import to_display_time
 
 
 class MPCLogTableWidget(QTableWidget):

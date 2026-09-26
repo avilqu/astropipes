@@ -24,7 +24,9 @@ from lib.gui.library.mpc_log_dialog import MPCLogDialog
 from datetime import datetime
 from lib.gui.library.masters_generation_thread import MastersGenerationThread
 from lib.gui.common.console_window import ConsoleOutputWindow
-from config import TIME_DISPLAY_MODE, ARCHIVE_PATH, is_session_stack_fits_file
+import config
+from config import ARCHIVE_PATH
+from lib.paths import is_session_stack_fits_file
 from lib.gui.library.follow_up_filter_dialog import FollowUpFilterDialog
 
 class LeftPanel(QWidget):
@@ -131,7 +133,7 @@ class LeftPanel(QWidget):
                 item, target, count, db.follow_up_is_flagged(target)
             )
         self._repopulate_follow_up_children()
-        if TIME_DISPLAY_MODE == 'Local':
+        if config.TIME_DISPLAY_MODE == 'Local':
             for date in reversed(db.get_unique_local_dates()):
                 count = db.get_file_count_by_local_date(date)
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])
@@ -762,7 +764,7 @@ class LeftPanel(QWidget):
             def load_all_files_in_viewer():
                 """Load all files for this date in FITS Viewer."""
                 db = get_db_manager()
-                if TIME_DISPLAY_MODE == 'Local':
+                if config.TIME_DISPLAY_MODE == 'Local':
                     files = db.get_files_by_local_date(date_name)
                 else:
                     files = db.get_files_by_date(date_name)
@@ -824,7 +826,7 @@ class LeftPanel(QWidget):
         for i in range(self.dates_item.childCount()):
             child = self.dates_item.child(i)
             date_name = child.text(0).split(" (")[0]
-            if TIME_DISPLAY_MODE == 'Local':
+            if config.TIME_DISPLAY_MODE == 'Local':
                 count = db.get_file_count_by_local_date(date_name)
             else:
                 count = db.get_file_count_by_date(date_name)
@@ -861,7 +863,7 @@ class LeftPanel(QWidget):
         self._repopulate_follow_up_children()
         self._repopulate_regions_children()
         # Repopulate dates
-        if TIME_DISPLAY_MODE == 'Local':
+        if config.TIME_DISPLAY_MODE == 'Local':
             for date in reversed(db.get_unique_local_dates()):
                 count = db.get_file_count_by_local_date(date)
                 item = QTreeWidgetItem(self.dates_item, [f"{date} ({count})"])

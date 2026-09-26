@@ -2,7 +2,7 @@
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-import config
+from lib import paths
 from lib.db import get_db_manager
 from lib.fits.region_views import generate_views_for_region
 
@@ -27,7 +27,7 @@ class RegionViewsBatchThread(QThread):
             return
 
         all_files = db.get_all_fits_files()
-        stacks = [f for f in all_files if config.is_session_stack_fits_file(f)]
+        stacks = [f for f in all_files if paths.is_session_stack_fits_file(f)]
 
         if not stacks:
             self.finished.emit({

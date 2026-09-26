@@ -14,7 +14,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-import config
+from lib import paths
 from lib.fits.display_stretch import (
     apply_stretch_to_uint8,
     two_point_stretch_limits,
@@ -193,8 +193,8 @@ def relocate_region_views_directory(
     Move STACKS_PATH/<target>/views/<old>/ to .../<new>/ and update view png_path values.
     Raises ValueError if the destination directory already exists.
     """
-    old_dir = config.region_views_path_for_region(target, old_name)
-    new_dir = config.region_views_path_for_region(target, new_name)
+    old_dir = paths.region_views_path_for_region(target, old_name)
+    new_dir = paths.region_views_path_for_region(target, new_name)
     if old_dir.resolve() == new_dir.resolve():
         return
     if new_dir.exists():
@@ -270,7 +270,7 @@ def generate_views_for_region(
         dec_min=region.dec_min,
         dec_max=region.dec_max,
     )
-    out_dir = config.region_views_path_for_region(region.target, region.name)
+    out_dir = paths.region_views_path_for_region(region.target, region.name)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     eligible = []

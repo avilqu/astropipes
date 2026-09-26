@@ -28,7 +28,8 @@ from PyQt6.QtWidgets import QMessageBox
 from lib.gui.common.console_window import ConsoleOutputWindow, RealTimeStringIO
 import signal
 from .platesolving_thread import PlatesolvingThread
-from config import to_display_time, is_session_stack_fits_file
+from lib.paths import is_session_stack_fits_file
+from lib.time_display import to_display_time
 from astropipes import VIEWER_PATH
 
 

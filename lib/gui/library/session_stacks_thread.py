@@ -6,6 +6,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 import config
+from lib import paths
 from lib.db import get_db_manager
 from lib.db.scan import FitsFileScanner
 from lib.gui.library.daily_stacks_thread import (
@@ -52,9 +53,9 @@ class SessionStacksBatchThread(QThread):
                 break
             filter_names = db.follow_up_get_filters(target)
             files_all = db.get_files_by_target(target)
-            raw_files = [f for f in files_all if not config.is_session_stack_fits_file(f)]
+            raw_files = [f for f in files_all if not paths.is_session_stack_fits_file(f)]
             existing_stack_paths = {
-                f.path for f in files_all if config.is_session_stack_fits_file(f) and f.path
+                f.path for f in files_all if paths.is_session_stack_fits_file(f) and f.path
             }
             target_align_ref = resolve_alignment_reference_raw(
                 raw_files,
@@ -73,8 +74,8 @@ class SessionStacksBatchThread(QThread):
                         f"\nNo light frames for target {target!r} with filter {fn!r} — skipping.\n"
                     )
                     continue
-                folder = config.data_path_target_folder_name(target)
-                out_dir = config.stacks_path_for_target(target)
+                folder = paths.data_path_target_folder_name(target)
+                out_dir = paths.stacks_path_for_target(target)
                 out_dir.mkdir(parents=True, exist_ok=True)
                 aligned_dir = (
                     Path(config.PROCESSED_PATH)
