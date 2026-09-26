@@ -60,8 +60,7 @@ class LeftPanel(QWidget):
                 padding-top: 2px;
                 padding-bottom: 2px;
                 padding-right: 4px;
-                padding-left: 0px;
-                margin-left: -23px;
+                padding-left: 2px;
             }
         """)
 
@@ -168,11 +167,11 @@ class LeftPanel(QWidget):
                 break
 
     def _follow_up_badge_widget(self, label_text: str) -> QWidget:
-        """Small blue ``F`` to the left of ``Target (#)``. Narrow width + negative inset so the row matches plain target items."""
+        """Small blue ``F`` to the left of ``Target (#)``. Narrow width + small inset so the row matches plain target items."""
         row = QWidget()
         row.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         lay = QHBoxLayout(row)
-        lay.setContentsMargins(-12, 1, 0, 1)
+        lay.setContentsMargins(2, 1, 0, 1)
         lay.setSpacing(3)
         badge = QLabel("F")
         badge.setObjectName("followUpBadge")
