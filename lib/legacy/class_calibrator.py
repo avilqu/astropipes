@@ -13,9 +13,9 @@ import ccdproc as ccdp
 from colorama import Fore, Style
 from astropy.io import fits
 
-from lib.class_fits_sequence import FITSSequence
+from lib.legacy.class_fits_sequence import FITSSequence
 import config as cfg
-import lib.helpers as hlp
+import lib.legacy.helpers as hlp
 
 
 write_path = Path(f'{os.getcwd()}/calibrated')

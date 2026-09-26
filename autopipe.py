@@ -23,15 +23,15 @@ import signal
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import astro-pipelines modules
-from lib.class_calibrator import Calibrator
-from lib.class_fits_sequence import FITSSequence
-import lib.solver
+from lib.legacy.class_calibrator import Calibrator
+from lib.legacy.class_fits_sequence import FITSSequence
+import lib.legacy.solver
 import config
 from colorama import Fore, Style
 import warnings
 from astropy import wcs
 from astropy.utils.exceptions import AstropyUserWarning
-import lib.helpers
+import lib.legacy.helpers
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=wcs.FITSFixedWarning)
@@ -72,7 +72,7 @@ class AutoPipeProcessor:
         self.running = True
         
         # Reset solver interruption flag
-        lib.solver.set_solver_interrupted(False)
+        lib.legacy.solver.set_solver_interrupted(False)
         
         # Create autopipe directory if calibration is enabled
         if self.enable_calibration and self.autopipe_path:
@@ -87,7 +87,7 @@ class AutoPipeProcessor:
         print(f"\n{Style.BRIGHT + Fore.YELLOW}Shutdown signal received. Stopping AutoPipe...{Style.RESET_ALL}")
         self.running = False
         # Also signal the solver to stop
-        lib.solver.set_solver_interrupted(True)
+        lib.legacy.solver.set_solver_interrupted(True)
         
     def get_relative_path(self, file_path):
         """Get the relative path from obs_path."""
@@ -150,7 +150,7 @@ class AutoPipeProcessor:
                 header = seq.files[0]['header']
                 
                 # Use helper function to extract coordinates
-                ra_center, dec_center, has_wcs, source = lib.helpers.extract_coordinates_from_header(header)
+                ra_center, dec_center, has_wcs, source = lib.legacy.helpers.extract_coordinates_from_header(header)
                 
                 if has_wcs:
                     solver_options.ra = ra_center
@@ -166,7 +166,7 @@ class AutoPipeProcessor:
                 solver_options.blind = True
             
             # Run platesolving
-            lib.solver.solve_offline(solver_options)
+            lib.legacy.solver.solve_offline(solver_options)
             
             print(f"{Style.BRIGHT + Fore.GREEN}Platesolving completed for {file_path}{Style.RESET_ALL}")
             return True
@@ -287,13 +287,13 @@ def main():
     )
     parser.add_argument(
         "--obs-path",
-        default=config.OBS_PATH,
-        help=f"Path to the observation directory to monitor (default: {config.OBS_PATH})"
+        default=config.DATA_PATH,
+        help=f"Path to the observation directory to monitor (default: {config.DATA_PATH})"
     )
     parser.add_argument(
         "--autopipe-path",
         default=None,
-        help="Path for output files when calibration is enabled (default: OBS_PATH/autopipe)"
+        help="Path for output files when calibration is enabled (default: DATA_PATH/autopipe)"
     )
     parser.add_argument(
         "--calibrate", "-C",

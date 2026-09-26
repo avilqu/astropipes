@@ -13,7 +13,7 @@ from astropy.stats import mad_std
 import ccdproc as ccdp
 
 import config as cfg
-import lib.helpers as hlp
+import lib.legacy.helpers as hlp
 
 
 class FITSSequence:
