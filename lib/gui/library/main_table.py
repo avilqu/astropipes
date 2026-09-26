@@ -22,7 +22,7 @@ from contextlib import redirect_stdout, redirect_stderr
 from lib.sci.platesolving import solve_single_image, PlatesolvingResult
 import signal
 from .platesolving_thread import PlatesolvingThread
-from config import to_display_time
+from lib.time_display import to_display_time
 from astropipes import VIEWER_PATH
 
 FITS_TABLE_HEADERS = [

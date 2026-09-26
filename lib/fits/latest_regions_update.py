@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Set, Tuple
 
 import config
+from lib import paths
 from lib.fits.region_views import SkyRegion, region_in_image_field
 
 
@@ -63,7 +64,7 @@ def run_latest_regions_update(
     log = log or (lambda _m: None)
     db = get_db_manager()
     all_files = db.get_all_fits_files()
-    raw_files = [f for f in all_files if not config.is_session_stack_fits_file(f) and f.date_obs]
+    raw_files = [f for f in all_files if not paths.is_session_stack_fits_file(f) and f.date_obs]
     if not raw_files:
         return {"success": False, "error": "No light frames with DATE-OBS in the database."}
 
@@ -79,7 +80,7 @@ def run_latest_regions_update(
     stacks = [
         f
         for f in all_files
-        if config.is_session_stack_fits_file(f)
+        if paths.is_session_stack_fits_file(f)
         and _stack_in_session_window(f, session_start, session_end)
     ]
     if not stacks:

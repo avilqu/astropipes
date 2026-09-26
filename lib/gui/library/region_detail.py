@@ -26,7 +26,7 @@ from lib.gui.library.main_table import (
     apply_fits_table_striping,
 )
 from lib.gui.library.context_dropdown import build_multi_file_menu
-from config import to_display_time
+from lib.time_display import to_display_time
 from lib.db import get_db_manager
 
 

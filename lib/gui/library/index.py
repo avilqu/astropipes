@@ -28,6 +28,8 @@ from lib.db.models import CalibrationMaster
 from lib.gui.library.menu_bar import create_menu_bar
 from lib.gui.common.console_window import ConsoleOutputWindow
 import config
+from lib import paths
+from lib.time_display import to_display_time
 import importlib
 
 
@@ -594,19 +596,18 @@ class AstroLibraryGUI(QMainWindow):
                 filtered = [
                     f for f in self.fits_files
                     if f.target == self.last_menu_value
-                    and not config.is_session_stack_fits_file(f)
+                    and not paths.is_session_stack_fits_file(f)
                 ]
                 self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
             elif self.last_menu_category == "followup_target":
                 filtered = [
                     f for f in self.fits_files
                     if f.target == self.last_menu_value
-                    and config.is_session_stack_fits_file(f)
+                    and paths.is_session_stack_fits_file(f)
                 ]
                 self.main_table_widget.populate_table(filtered, show_stack_count_column=True)
             elif self.last_menu_category == "date":
-                from config import TIME_DISPLAY_MODE, to_display_time
-                if TIME_DISPLAY_MODE == 'Local':
+                if config.TIME_DISPLAY_MODE == 'Local':
                     filtered = [
                         f for f in self.fits_files
                         if f.date_obs and to_display_time(f.date_obs).strftime('%Y-%m-%d') == self.last_menu_value
@@ -639,7 +640,7 @@ class AstroLibraryGUI(QMainWindow):
 
     def _session_stack_files(self):
         """All session stacks in the loaded library (for region detail / overlap checks)."""
-        return [f for f in self.fits_files if config.is_session_stack_fits_file(f)]
+        return [f for f in self.fits_files if paths.is_session_stack_fits_file(f)]
 
     def _on_region_deleted(self, region_id: int):
         """Clear region detail panel when the selected region was removed."""
@@ -690,20 +691,19 @@ class AstroLibraryGUI(QMainWindow):
         elif category == "target":
             filtered = [
                 f for f in self.fits_files
-                if f.target == value and not config.is_session_stack_fits_file(f)
+                if f.target == value and not paths.is_session_stack_fits_file(f)
             ]
             self.main_table_widget.populate_table(filtered, show_stack_count_column=False)
             self.right_stack.setCurrentIndex(1)
         elif category == "followup_target":
             filtered = [
                 f for f in self.fits_files
-                if f.target == value and config.is_session_stack_fits_file(f)
+                if f.target == value and paths.is_session_stack_fits_file(f)
             ]
             self.main_table_widget.populate_table(filtered, show_stack_count_column=True)
             self.right_stack.setCurrentIndex(1)
         elif category == "date":
-            from config import TIME_DISPLAY_MODE, to_display_time
-            if TIME_DISPLAY_MODE == 'Local':
+            if config.TIME_DISPLAY_MODE == 'Local':
                 filtered = [
                     f for f in self.fits_files
                     if f.date_obs and to_display_time(f.date_obs).strftime('%Y-%m-%d') == value
