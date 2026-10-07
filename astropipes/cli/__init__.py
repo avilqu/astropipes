@@ -48,6 +48,14 @@ def main():
         "--scan-all", action="store_true", help="scan and import both image and calibration FITS files into database"
     )
     parser.add_argument(
+        "--watch", action="store_true",
+        help="watch DATA_PATH and stack each finished run of the follow-up targets (stop with Ctrl+C)"
+    )
+    parser.add_argument(
+        "--process-latest-run", metavar="TARGET",
+        help="stack the latest run of a follow-up target now, with region views"
+    )
+    parser.add_argument(
         "-S", "--solve", nargs="+", metavar="FITS_FILE", 
         help="solve one or more FITS files using astrometry.net"
     )
@@ -755,6 +763,40 @@ def main():
             print(f"{Style.BRIGHT + Fore.RED}Error fetching NEOCP objects: {e}{Style.RESET_ALL}")
             sys.exit(1)
 
+    def watch_runs():
+        """Run the automatic processing watcher until Ctrl+C or SIGTERM."""
+        import signal
+        import threading
+        from astropipes.workflows.autoprocess import watch
+
+        stop = threading.Event()
+
+        def request_stop(signum, frame):
+            if stop.is_set():
+                sys.exit(1)
+            print("\nStopping (press Ctrl+C again to quit now)...", flush=True)
+            stop.set()
+
+        signal.signal(signal.SIGINT, request_stop)
+        signal.signal(signal.SIGTERM, request_stop)
+        result = watch(lambda text: print(text, end="", flush=True), stop.is_set)
+        if not result.get("success"):
+            print(f"{Style.BRIGHT + Fore.RED}Error: {result.get('error')}{Style.RESET_ALL}")
+            sys.exit(1)
+        print(f"Runs processed: {result['runs_processed']}, failed: {result['runs_failed']}")
+
+    def process_latest_run():
+        """Stack the latest run of one follow-up target."""
+        from astropipes.workflows.autoprocess import process_latest_run as process
+        result = process(args.process_latest_run, lambda text: print(text, end="", flush=True), lambda: False)
+        for err in result.get("errors", []):
+            print(f"{Fore.YELLOW}  {err}{Style.RESET_ALL}")
+        if not result.get("success"):
+            print(f"{Style.BRIGHT + Fore.RED}Error: {result.get('error')}{Style.RESET_ALL}")
+            sys.exit(1)
+        print(f"{Style.BRIGHT + Fore.GREEN}Done:{Style.RESET_ALL} {len(result['stack_paths'])} stack(s), "
+              f"{result.get('views_exported', 0)} region PNG(s) in {result.get('regions_dir')}")
+
     # Handle arguments
     if args.gui is not None:
         launch_gui()
@@ -766,6 +808,10 @@ def main():
         scan_calibration()
     elif args.scan_all:
         scan_all()
+    elif args.watch:
+        watch_runs()
+    elif args.process_latest_run:
+        process_latest_run()
     elif args.solve:
         solve_image()
     elif args.calibrate:

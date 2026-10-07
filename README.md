@@ -19,7 +19,7 @@ Astropipes manages and processes astronomical images (FITS files), with a focus 
 ./install.sh
 ```
 
-The script checks for Python 3.14 and creates a virtual environment in `.venv`. It then installs the dependencies from `requirements.txt` and installs astropipes itself in editable mode. It links the `astropipes` and `astropipes-viewer` commands into `~/bin` (or `~/.local/bin` if `~/bin` doesn't exist), so they can be run from anywhere. Finally, it adds **Astropipes Library** and **Astropipes Viewer** entries to the application launcher, in `~/.local/share/applications`.
+The script checks for Python 3.14 and creates a virtual environment in `.venv`. It then installs the dependencies from `requirements.txt` and installs astropipes itself in editable mode. It links the `astropipes` and `astropipes-viewer` commands into `~/bin` (or `~/.local/bin` if `~/bin` doesn't exist), so they can be run from anywhere. Finally, it adds **Astropipes Library** and **Astropipes Viewer** entries to the application launcher, in `~/.local/share/applications`. It also installs the `astropipes-watch` systemd user service for [automatic processing](#automatic-processing), without enabling it.
 
 To do the same by hand:
 
@@ -71,7 +71,7 @@ Everything written under `PROCESSED_PATH` is generated and can be recreated:
 | `substacks/` | Motion-tracked substacks |
 | `daily_stacks/` | Daily stacks from the Library |
 | `session_stacks_work/` | Aligned frames used for session stacks |
-| `regions/` | Output of **Latest regions update** |
+| `regions/` | Output of **Latest regions update**, and one `<YYYY-MM-DD>/` folder per night from automatic processing |
 
 **Database → Cleanup temp directories** in the Library empties `solved`, `calibrated`, `stacked`, `aligned`, `substacks` and `session_stacks_work`.
 
@@ -176,6 +176,8 @@ astropipes --help
 | `-A`, `--align FILES` | Align to the first file with the default method, into `PROCESSED_PATH/aligned/` |
 | `-I`, `--integrate FILES` | Stack aligned frames into `PROCESSED_PATH/integrated/`, named `integration_<Filter>.fits` when all frames share a filter. Options: `--integration-method {average,median,sum}`, `--sigma-clip`. |
 | `--get-neocp-objects` | List the objects currently on the NEOCP (via NEOfixer) |
+| `--watch` | Automatic processing of each finished run (see below) |
+| `--process-latest-run TARGET` | Stack the latest run of a follow-up target now, with its region views, as `--watch` does |
 | `--get-obs NEOCP_DESIGNATION` | Print the observations of a NEOCP object (via NEOfixer), in MPC 80-column format |
 
 Examples:
@@ -188,6 +190,32 @@ astropipes -I aligned/*.fits --integration-method median --sigma-clip
 ```
 
 `python -m astropipes` is equivalent to `astropipes`.
+
+## Automatic processing
+
+`astropipes --watch` processes each observing run as soon as it ends, while the next run is being captured. It is meant to run all the time on the observatory computer.
+
+- Every `AUTOPROCESS_POLL_SECONDS` (30 s), it imports the new light frames in `DATA_PATH`. Files modified in the last `AUTOPROCESS_FILE_SETTLE_SECONDS` (10 s) are left for the next poll, so frames still being written are not read.
+- A run is a series of frames of the same target less than 30 minutes apart, as in the observation log. It ends when a frame of another target arrives, or when no frame of the target has been written for `AUTOPROCESS_RUN_IDLE_MINUTES` (30 min), which covers the last run of the night.
+- Only runs of targets flagged for follow-up are processed, one at a time:
+  - one stack per flagged filter in the run, aligned like the session stacks (`ALIGNREF`), into `STACKS_PATH/<Target>/stack_<Target>_<Filter>_<YYYYMMDD>.fits`. Later runs of the same night get `_2`, `_3`…;
+  - the stacks are added to the library and plate-solved;
+  - the target's region views are generated;
+  - the oldest (`-REF`) and newest (`-NEW`) view of each region in the new stacks are copied into `PROCESSED_PATH/regions/<YYYY-MM-DD>/`, replacing the previous copies of that night.
+- Processed runs are recorded in `PROCESSED_PATH/autoprocess_state.json`. At startup, the watcher processes the runs it missed, as long as they were written in the last `AUTOPROCESS_RECOVERY_HOURS` (36 h). The first time it starts, everything already in the library counts as processed.
+- Only one watcher runs at a time (lock file `PROCESSED_PATH/autoprocess.lock`).
+
+The Library can stay open meanwhile. Turn its folder watching off on that computer so only the watcher imports frames. Frames of several targets interleaved (A, B, A, B…) make one run per frame, so capture each target in one block.
+
+`install.sh` installs it as the systemd user service `astropipes-watch`, but doesn't enable it. To run it on the observatory computer:
+
+```bash
+systemctl --user enable --now astropipes-watch   # start now and at login
+loginctl enable-linger $USER                     # keep it running without a login session
+journalctl --user -u astropipes-watch -f         # follow its log
+```
+
+To use a settings file other than the default, uncomment the `ASTROPIPES_CONFIG` line with `systemctl --user edit --full astropipes-watch`.
 
 ## Calibration
 
@@ -222,7 +250,8 @@ astropipes/
 ├── astrometry/    plate solving, catalogs (SIMBAD/Gaia/SkyBoT), source detection, LSPC, orbits, MPC reports
 ├── regions/       region-of-interest geometry and PNG views
 ├── workflows/     multi-step jobs combining files and the database: stacking, sessions, archive/rename,
-│                  region views, substacks, ephemerides, single-file library operations
+│                  region views, substacks, ephemerides, single-file library operations,
+│                  automatic run processing (autoprocess.py, `astropipes --watch`)
 ├── cli/           the `astropipes` command
 └── gui/
     ├── common/    app setup, JobThread, viewer launcher, console/header windows, shared dialogs and result tables
@@ -231,6 +260,7 @@ astropipes/
 
 share/
 ├── applications/  .desktop launchers (paths filled in by install.sh)
+├── systemd/       user service for `astropipes --watch` (installed by install.sh, not enabled)
 └── icons/         application icon
 ```
 

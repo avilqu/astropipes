@@ -221,6 +221,29 @@ install_desktop_files() {
     fi
 }
 
+# Install the systemd user unit for automatic processing (astropipes --watch), without enabling it
+install_systemd_unit() {
+    print_step "Installing systemd user service..."
+
+    UNIT_NAME="astropipes-watch.service"
+    UNIT_SOURCE="$PROJECT_DIR/share/systemd/$UNIT_NAME"
+    USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+    if [ ! -f "$UNIT_SOURCE" ]; then
+        print_warning "Service file not found: $UNIT_SOURCE"
+        return
+    fi
+
+    mkdir -p "$USER_UNIT_DIR"
+    sed -e "s|@BIN_DIR@|$PROJECT_DIR/.venv/bin|g" "$UNIT_SOURCE" > "$USER_UNIT_DIR/$UNIT_NAME"
+    chmod 644 "$USER_UNIT_DIR/$UNIT_NAME"
+    print_message "Installed $UNIT_NAME to $USER_UNIT_DIR (not enabled)"
+
+    if command -v systemctl &> /dev/null; then
+        systemctl --user daemon-reload 2>/dev/null || print_warning "Could not reload the systemd user manager; run: systemctl --user daemon-reload"
+    fi
+}
+
 # Print installation summary
 print_summary() {
     print_step "Installation Summary"
@@ -245,6 +268,10 @@ print_summary() {
     echo "    or in ~/.config/astropipes/config.toml"
     echo "  - Install Astrometry.Net if you want to use platesolving features"
     echo ""
+    print_message "Automatic processing service installed but not enabled. To run it on an observatory computer:"
+    echo "  systemctl --user enable --now astropipes-watch"
+    echo "  loginctl enable-linger \$USER    # keep it running without a login session"
+    echo ""
     print_message "Desktop files installed to: $HOME/.local/share/applications"
     echo "  If apps don't appear in the launcher, try:"
     echo "  - Refreshing the application menu (right-click on menu > Refresh)"
@@ -268,6 +295,7 @@ main() {
     install_package
     install_command_links
     install_desktop_files
+    install_systemd_unit
     print_summary
 }
 

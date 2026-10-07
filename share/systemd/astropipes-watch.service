@@ -1,0 +1,23 @@
+# Automatic processing of observing runs (astropipes --watch), as a systemd user service.
+# install.sh installs it into ~/.config/systemd/user/ (with @BIN_DIR@ filled in) but doesn't enable it:
+#
+#   systemctl --user enable --now astropipes-watch
+#   loginctl enable-linger $USER          # keep it running without a login session
+#   journalctl --user -u astropipes-watch -f
+
+[Unit]
+Description=Astropipes automatic run processing
+After=network-online.target
+
+[Service]
+ExecStart=@BIN_DIR@/astropipes --watch
+# Uncomment to use a settings file other than ~/.config/astropipes/config.toml
+#Environment=ASTROPIPES_CONFIG=%h/.config/astropipes/config.toml
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=30
+# Let the current job notice the stop request before being killed
+TimeoutStopSec=120
+
+[Install]
+WantedBy=default.target

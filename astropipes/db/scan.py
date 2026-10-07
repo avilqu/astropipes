@@ -107,6 +107,14 @@ class FitsFileScanner:
         
         return results
     
+    def import_file(self, fits_file: Path) -> bool:
+        """
+        Import one light frame laid out as <data_path>/<Target>/<Filter>/file.fits.
+        Returns True if imported, False if already in the database.
+        """
+        fits_file = Path(fits_file)
+        return self._process_fits_file(fits_file, fits_file.parent.parent.name, fits_file.parent.name)
+
     def _process_fits_file(self, fits_file: Path, target_name: str, filter_name: str) -> bool:
         """
         Process a single FITS file and add it to the database.

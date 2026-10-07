@@ -75,3 +75,10 @@ BLINK_PERIOD_MS = 1000
 # Library: watch DATA_PATH and CALIBRATION_PATH and scan new files automatically
 DATA_FOLDER_WATCH_ENABLED = True
 DATA_FOLDER_WATCH_DEBOUNCE_MS = 1500
+
+# Automatic processing (astropipes --watch): poll DATA_PATH, and stack each finished run of a
+# follow-up target. A run ends when a frame of another target arrives, or after the idle time.
+AUTOPROCESS_POLL_SECONDS = 30
+AUTOPROCESS_RUN_IDLE_MINUTES = 30
+AUTOPROCESS_FILE_SETTLE_SECONDS = 10  # Skip files modified more recently (still being written)
+AUTOPROCESS_RECOVERY_HOURS = 36  # On startup, process missed runs that ended this recently

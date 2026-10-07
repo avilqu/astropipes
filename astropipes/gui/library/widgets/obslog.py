@@ -22,6 +22,7 @@ from astropipes.gui.library.threads import PlatesolvingThread
 from astropipes.core.paths import is_session_stack_fits_file
 from astropipes.core.timefmt import to_display_time
 from astropipes.gui.common.launcher import launch_viewer
+from astropipes.workflows.sessions import RUN_TIME_WINDOW_MINUTES, split_into_runs
 
 
 class RunSummaryWidget(QWidget):
@@ -186,7 +187,7 @@ class FitsTableWidget(QTableWidget):
         self.itemSelectionChanged.connect(self._on_selection_changed)
         self.cellClicked.connect(self._on_cell_clicked)
     
-    RUN_TIME_WINDOW_MINUTES = 30
+    RUN_TIME_WINDOW_MINUTES = RUN_TIME_WINDOW_MINUTES
 
     def _group_files_by_runs(self, fits_files):
         """Group FITS files by runs based on stored run_id or target and time proximity."""
@@ -273,25 +274,7 @@ class FitsTableWidget(QTableWidget):
                     db_manager.assign_files_to_run(run_id, ids)
         
         # Group remaining unassigned files by target and time proximity
-        runs = []
-        current_run = []
-        
-        for file in still_unassigned:
-            if not current_run:
-                current_run = [file]
-            else:
-                last_file = current_run[-1]
-                same_target = file.target == last_file.target
-                time_diff = abs((file.date_obs - last_file.date_obs).total_seconds() / 60) if file.date_obs and last_file.date_obs else float('inf')
-                within_time_window = time_diff <= self.RUN_TIME_WINDOW_MINUTES
-                if same_target and within_time_window:
-                    current_run.append(file)
-                else:
-                    if current_run:
-                        runs.append((None, current_run))
-                    current_run = [file]
-        if current_run:
-            runs.append((None, current_run))
+        runs = [(None, run_files) for run_files in split_into_runs(still_unassigned, self.RUN_TIME_WINDOW_MINUTES)]
         
         final_runs = []
         for run_id, run_files in runs_by_id.items():

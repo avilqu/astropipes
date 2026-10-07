@@ -3,6 +3,8 @@ Stacking pipelines: calibrate → align → integrate library files.
 
 - generate_session_stacks: one stack per observing session of a target (daily stacks, and the
   follow-up session stacks written to STACKS_PATH).
+- stack_register_solve: session stacks of one target and filter, registered in the library and
+  plate-solved.
 - generate_follow_up_session_stacks: session stacks for every follow-up target and filter, then
   register them in the library and plate-solve them.
 - generate_filter_masters: one integrated image per filter of a target.
@@ -137,6 +139,7 @@ def generate_session_stacks(
     skip_existing_stack_paths=None,
     stack_filename_include_session_index=True,
     alignment_reference_raw_path=None,
+    stack_filename=None,
 ):
     """
     Core daily/session stack generation.
@@ -158,6 +161,9 @@ def generate_session_stacks(
     (used for cross-filter session stacks). Otherwise resolve via resolve_alignment_reference_raw
     from skip_existing_stack_paths and earliest date_obs in files.
 
+    stack_filename: if set, all files go into a single stack with this file name, without
+    grouping them into sessions (used for per-run stacks).
+
     All stacks and aligned intermediates store ALIGNREF as that raw file's absolute path.
     """
     if not files:
@@ -167,9 +173,13 @@ def generate_session_stacks(
     log(f"{Style.BRIGHT + Fore.BLUE}Starting daily stacks generation for target: {target_name}{filter_info}{Style.RESET_ALL}")
     log(f"Total files: {len(files)}\n")
 
-    log_banner(log, "Step 1: Grouping files by session (12h threshold)")
-
-    sessions = group_files_by_session(files)
+    if stack_filename:
+        log_banner(log, f"Step 1: Single stack {stack_filename}")
+        dated = sorted([f for f in files if f.date_obs], key=lambda f: f.date_obs)
+        sessions = [dated] if dated else []
+    else:
+        log_banner(log, "Step 1: Grouping files by session (12h threshold)")
+        sessions = group_files_by_session(files)
 
     if not sessions:
         return {'error': 'No valid sessions found (files must have date_obs)', 'success': False}
@@ -196,7 +206,9 @@ def generate_session_stacks(
             log(f"  Session {i+1}: {len(session)} files, from {start_time} to {end_time}\n")
             filter_suffix = f"_{filter_name}" if filter_name else ""
             session_date_str = session[0].date_obs.strftime('%Y%m%d')
-            if stack_filename_include_session_index:
+            if stack_filename:
+                output_filename = stack_filename
+            elif stack_filename_include_session_index:
                 output_filename = f"stack_{target_name}{filter_suffix}_{session_date_str}_session{i+1}.fits"
             else:
                 base_key = (target_name, filter_name or '', session_date_str)
@@ -401,10 +413,84 @@ def generate_session_stacks(
     }
 
 
-def _files_matching_filter(raw_files, filter_name: str):
+def files_matching_filter(raw_files, filter_name: str):
     if filter_name == "Unknown":
         return [f for f in raw_files if not f.filter_name or f.filter_name == "Unknown"]
     return [f for f in raw_files if f.filter_name == filter_name]
+
+
+def stack_register_solve(
+    target,
+    files,
+    filter_name,
+    log,
+    should_cancel,
+    *,
+    existing_stack_paths,
+    alignment_reference_raw_path=None,
+    stack_filename=None,
+):
+    """
+    Session stacks of one target and filter in STACKS_PATH/<target>/ (or a single stack named
+    stack_filename), then register each new stack in the library and plate-solve it.
+
+    existing_stack_paths: paths of the target's stacks already in the library; those are skipped,
+    and the new ones are added to the set. Returns generate_session_stacks' result dict, with
+    'errors' as (target, filter, [path,] message) tuples.
+    """
+    out_dir = paths.stacks_path_for_target(target)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    aligned_dir = Path(paths.work_dir(
+        "session_stacks_work", data_path_target_folder_name(target), path_slug(filter_name), "aligned"
+    ))
+    aligned_dir.mkdir(parents=True, exist_ok=True)
+    log_banner(log, f"Session stacks: {target} / {filter_name}")
+    res = generate_session_stacks(
+        target,
+        files,
+        filter_name,
+        log,
+        should_cancel,
+        output_stacks_dir=str(out_dir),
+        allow_single_session=True,
+        aligned_output_dir=str(aligned_dir),
+        skip_existing_stack_paths=existing_stack_paths,
+        stack_filename_include_session_index=False,
+        alignment_reference_raw_path=alignment_reference_raw_path,
+        stack_filename=stack_filename,
+    )
+    res["errors"] = []
+    if not res.get("success"):
+        err = res.get("error", "unknown error")
+        res["errors"].append((target, filter_name, err))
+        log(f"✗ Stack generation failed: {err}\n")
+        return res
+    skipped_existing = res.get("stacks_skipped_existing", 0)
+    if skipped_existing:
+        log(f"  ↷ Skipped {skipped_existing} stack(s) already present in database\n")
+
+    scanner = FitsFileScanner()
+    for p in res.get("stack_paths", []):
+        existing_stack_paths.add(p)
+        if should_cancel():
+            break
+        path = Path(p)
+        imported = scanner.import_fits_with_layout_target(
+            path, target, filter_fallback=filter_name
+        )
+        if imported:
+            log(f"  Registered in database: {path.name}\n")
+        else:
+            log(f"  (Skipped DB import — already registered: {path.name})\n")
+
+        sol = solve_and_update_library(str(path), output_callback=log)
+        if not sol.success:
+            msg = getattr(sol, "message", "platesolve failed")
+            res["errors"].append((target, filter_name, str(path), msg))
+            log(f"  ✗ Platesolve failed: {msg}\n")
+        else:
+            log(f"  ✓ Platesolved: {path.name}\n")
+    return res
 
 
 def generate_follow_up_session_stacks(log, should_cancel):
@@ -419,7 +505,6 @@ def generate_follow_up_session_stacks(log, should_cancel):
     if not targets:
         return {"success": False, "error": "No targets flagged for follow-up."}
 
-    scanner = FitsFileScanner()
     for target in targets:
         if should_cancel():
             break
@@ -438,61 +523,21 @@ def generate_follow_up_session_stacks(log, should_cancel):
         for fn in filter_names:
             if should_cancel():
                 break
-            subset = _files_matching_filter(raw_files, fn)
+            subset = files_matching_filter(raw_files, fn)
             if not subset:
                 log(f"\nNo light frames for target {target!r} with filter {fn!r} — skipping.\n")
                 continue
-            out_dir = paths.stacks_path_for_target(target)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            aligned_dir = Path(paths.work_dir(
-                "session_stacks_work", data_path_target_folder_name(target), path_slug(fn), "aligned"
-            ))
-            aligned_dir.mkdir(parents=True, exist_ok=True)
-            log_banner(log, f"Session stacks: {target} / {fn}")
-            res = generate_session_stacks(
-                target,
-                subset,
-                fn,
-                log,
-                should_cancel,
-                output_stacks_dir=str(out_dir),
-                allow_single_session=True,
-                aligned_output_dir=str(aligned_dir),
-                skip_existing_stack_paths=existing_stack_paths,
-                stack_filename_include_session_index=False,
+            res = stack_register_solve(
+                target, subset, fn, log, should_cancel,
+                existing_stack_paths=existing_stack_paths,
                 alignment_reference_raw_path=target_align_ref,
             )
+            results["errors"].extend(res.get("errors", []))
             if not res.get("success"):
-                err = res.get("error", "unknown error")
-                results["errors"].append((target, fn, err))
-                log(f"✗ Stack generation failed: {err}\n")
                 continue
-            skipped_existing = res.get("stacks_skipped_existing", 0)
-            if skipped_existing:
-                log(f"  ↷ Skipped {skipped_existing} stack(s) already present in database\n")
             ref_from_run = res.get("alignment_reference_raw_path")
             if ref_from_run:
                 target_align_ref = ref_from_run
-            for p in res.get("stack_paths", []):
-                existing_stack_paths.add(p)
-                if should_cancel():
-                    break
-                path = Path(p)
-                imported = scanner.import_fits_with_layout_target(
-                    path, target, filter_fallback=fn
-                )
-                if imported:
-                    log(f"  Registered in database: {path.name}\n")
-                else:
-                    log(f"  (Skipped DB import — already registered: {path.name})\n")
-
-                sol = solve_and_update_library(str(path), output_callback=log)
-                if not sol.success:
-                    msg = getattr(sol, "message", "platesolve failed")
-                    results["errors"].append((target, fn, str(path), msg))
-                    log(f"  ✗ Platesolve failed: {msg}\n")
-                else:
-                    log(f"  ✓ Platesolved: {path.name}\n")
 
     if should_cancel():
         results["success"] = False

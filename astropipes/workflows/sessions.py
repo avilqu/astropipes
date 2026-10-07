@@ -1,6 +1,6 @@
 """
-Observing sessions: grouping library files into nights, and choosing the raw frame that all
-stacks of a target are aligned to (ALIGNREF).
+Observing sessions and runs: grouping library files into nights and into runs, and choosing the
+raw frame that all stacks of a target are aligned to (ALIGNREF).
 """
 
 import os
@@ -10,6 +10,8 @@ from astropy.io import fits
 
 # Images more than this many hours apart belong to different sessions
 SESSION_THRESHOLD_HOURS = 12
+# Consecutive frames of the same target at most this many minutes apart belong to the same run
+RUN_TIME_WINDOW_MINUTES = 30
 
 
 def norm_path(p):
@@ -61,6 +63,30 @@ def group_files_by_session(files, session_threshold_hours=SESSION_THRESHOLD_HOUR
         sessions.append(current_session)
 
     return sessions
+
+
+def split_into_runs(files, window_minutes=RUN_TIME_WINDOW_MINUTES):
+    """
+    Split files, in the given order, into runs: consecutive files of the same target whose
+    date_obs are at most window_minutes apart. Returns a list of lists.
+    """
+    runs = []
+    current_run = []
+    for file in files:
+        if current_run:
+            last_file = current_run[-1]
+            if file.date_obs and last_file.date_obs:
+                gap = abs((file.date_obs - last_file.date_obs).total_seconds() / 60)
+            else:
+                gap = float('inf')
+            if file.target == last_file.target and gap <= window_minutes:
+                current_run.append(file)
+                continue
+            runs.append(current_run)
+        current_run = [file]
+    if current_run:
+        runs.append(current_run)
+    return runs
 
 
 def _read_alignref_raw_from_stack_fits(stack_path: str):

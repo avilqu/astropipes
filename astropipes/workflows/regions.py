@@ -125,6 +125,50 @@ def generate_all_region_views(log, should_cancel) -> dict:
     return results
 
 
+def update_region_views_for_new_stacks(target, new_stack_paths, dest_dir: Path, log, should_cancel) -> dict:
+    """
+    PNG views of the target's regions on all of its session stacks (only missing PNGs are
+    written; the stretch stays shared across all stacks), then, for each region seen on one of
+    new_stack_paths, copy the oldest view (REF) and the newest view on a new stack (NEW) into
+    dest_dir, overwriting earlier copies.
+    """
+    results = {"success": True, "regions": 0, "generated": 0, "exported": 0, "errors": []}
+    db = get_db_manager()
+    regions = [r for r in db.get_all_regions() if r.target == target]
+    if not regions:
+        log(f"No regions of interest defined for {target}.\n")
+        return results
+    stacks = [f for f in db.get_files_by_target(target) if paths.is_session_stack_fits_file(f)]
+    new_paths = {norm_path(p) for p in new_stack_paths}
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    for region in regions:
+        if should_cancel():
+            results["cancelled"] = True
+            break
+        log(f"Region: {region.name}\n")
+        sub = generate_views_for_region(region, stacks, log=log, should_cancel=should_cancel)
+        results["regions"] += 1
+        results["generated"] += sub.get("generated", 0)
+        results["errors"].extend((region.name, err) for err in sub.get("errors", []))
+
+        views = [
+            v for v in db.get_region_views(region.id) if v.png_path and os.path.isfile(v.png_path)
+        ]
+        new_views = [
+            v for v in views if v.stack_fits_path and norm_path(v.stack_fits_path) in new_paths
+        ]
+        if not new_views:
+            continue
+        views.sort(key=_view_sort_key)
+        new_views.sort(key=_view_sort_key)
+        copied, errs = export_region_pair(region, views[0], new_views[-1], dest_dir, log, overwrite=True)
+        results["exported"] += copied
+        results["errors"].extend(errs)
+
+    return results
+
+
 def _view_sort_key(view) -> datetime:
     if view.date_obs:
         return view.date_obs
@@ -154,6 +198,27 @@ def _unique_dest_path(dest_dir: Path, basename: str) -> Path:
         if not candidate.exists():
             return candidate
         n += 1
+
+
+def export_region_pair(region, ref_view, new_view, dest_dir: Path, log, *, overwrite=False):
+    """
+    Copy a region's REF and NEW view PNGs into dest_dir as <Region>-REF.png / <Region>-NEW.png.
+    Without overwrite, existing files are kept and the copies get a _2, _3… suffix.
+    Returns (number copied, [(region name, error)]).
+    """
+    copied = 0
+    errors = []
+    for role, view in (("REF", ref_view), ("NEW", new_view)):
+        basename = _region_export_filename(region.name, role)
+        dest = dest_dir / basename if overwrite else _unique_dest_path(dest_dir, basename)
+        try:
+            shutil.copy2(Path(view.png_path), dest)
+            copied += 1
+            log(f"    → {dest.name}\n")
+        except OSError as e:
+            errors.append((region.name, str(e)))
+            log(f"    ✗ {role}: {e}\n")
+    return copied, errors
 
 
 def _stack_in_session_window(stack, session_start: datetime, session_end: datetime) -> bool:
@@ -251,24 +316,14 @@ def run_latest_regions_update(log=None, should_cancel=None) -> dict:
         session_views.sort(key=_view_sort_key)
         ref_view = all_views[0]
         new_view = session_views[-1]
-        to_copy = [("REF", ref_view), ("NEW", new_view)]
 
         log(
             f"  {region.name} ({region.target}): "
             f"{len(session_views)} session view(s), {len(all_views)} total — copying REF + NEW\n"
         )
-        for role, view in to_copy:
-            src = Path(view.png_path)
-            dest = _unique_dest_path(
-                dest_dir, _region_export_filename(region.name, role)
-            )
-            try:
-                shutil.copy2(src, dest)
-                copied += 1
-                log(f"    → {dest.name}\n")
-            except OSError as e:
-                errors.append((region.name, str(e)))
-                log(f"    ✗ {role}: {e}\n")
+        n, errs = export_region_pair(region, ref_view, new_view, dest_dir, log)
+        copied += n
+        errors.extend(errs)
 
     if copied == 0 and not errors:
         return {
