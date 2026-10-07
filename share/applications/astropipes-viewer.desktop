@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Astropipes Viewer
+Name[en]=Astropipes Viewer
+Comment=FITS Image Viewer for Astronomical Data
+Comment[en]=FITS Image Viewer for Astronomical Data
+Exec=@BIN_DIR@/astropipes-viewer %F
+Icon=@ICON@
+Terminal=false
+Categories=Science;Astronomy;Education;Graphics;Viewer;
+Keywords=astronomy;fits;image;viewer;display;
+StartupNotify=true
+MimeType=application/fits;image/fits;

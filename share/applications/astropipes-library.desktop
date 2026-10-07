@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Astropipes Library
+Name[en]=Astropipes Library
+Comment=Astronomical Image Library Management Tool
+Comment[en]=Astronomical Image Library Management Tool
+Exec=@BIN_DIR@/astropipes -G
+Icon=@ICON@
+Terminal=false
+Categories=Science;Astronomy;Education;
+Keywords=astronomy;fits;image;library;management;
+StartupNotify=true

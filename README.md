@@ -1,306 +1,247 @@
-# Astro-Pipelines
+# Astropipes
 
-A set of various tools to perform astronomical image reduction - image calibration (bias, dark, flat and calibration masters library), platesolving (using offline Astrometry.Net engine), image registration (WCS reprojection method), and sequence integration.
+Astropipes manages and processes astronomical images (FITS files), with a focus on asteroid follow-up. It has three parts:
 
-Miscellaneous other tools added as the project develops.
+- **The Library** (`astropipes -G`): a database of your light frames and calibration masters, browsable by target, date and observing run, with batch operations such as session stacks, region-of-interest views and archiving.
+- **The FITS viewer** (`astropipes-viewer`): blink sequences, plate-solve, calibrate, align and stack them, overlay catalog objects, stack on a moving object's ephemeris and measure its positions for MPC reports.
+- **The command line** (`astropipes`): scanning, plate solving, calibration, calibration masters, alignment and integration.
 
-## Setup
+## Requirements
 
-### Python packages dependencies
+- Linux. The installer and the application launchers target a Linux desktop.
+- Python 3.14. The versions pinned in `requirements.txt` have been tested with it.
+- For plate solving: a local [Astrometry.net](https://astrometry.net/) engine (`solve-field`) with its index files, which can take over 50 GB. Without it, everything except plate solving works.
+- An internet connection for the online services: SIMBAD, Gaia and SkyBoT searches, Find_Orb ephemerides, NEOfixer (NEOCP objects and observations) and the MPC observatory code lookup.
 
-Astro-Pipelines requires Python 3.11 to run as some of its dependencies aren't compatible with the latest versions (namely `astroscrappy`).
-
-The recommended approach is to create a virtual environment:
-
-- `python3.11 -m venv .venv`
-- `source .venv/bin/activate`
-- `pip install -r requirements.txt`
-
-For manual installation, Astro-Pipelines depends on the following pakages:
-
-- `colorama`
-- `astropy`
-- `ccdproc`
-- `astroquery`
-- `numpy`
-- `pyds9`
-- `photutils`
-- `requests`
-- `watchdog` (for autopipe.py)
-- `PyQt6` (for GUI functionality)
-
-### Astrometry.Net
-
-The platesolving methods rely on local access to the [Astrometry.Net engine](https://astrometry.net/) (`solve-field` CLI) and required index files. This is a pretty heavy requirement (the whole index files package weighs over 50GB!).
-
-Astrometry.Net must be built from source code and is available for MacOS, Linux and Unix. Reported to work on Windows via Cygwin.
-
-Without Astrometry.Net engine installed, the `-S` option (`--solve`) won't work (the rest should work without issues). Note that this package includes a CLI wrapper for Astrometry.Net that can call the online solver (much slower and requires Internet connection) - `platesolve.py`.
-
-### Timeout and Error Handling
-
-Astro-Pipelines includes robust timeout and error handling mechanisms to prevent the astrometry engine from hanging on unsolvable images:
-
-- **Configurable timeouts**: Set maximum solving time for both online and offline solving
-- **Image validation**: Pre-screening of images to skip obviously unsolvable ones
-- **Network error handling**: Graceful handling of connection issues with online solving
-- **Progress reporting**: Clear status messages during long operations
-
-See `TIMEOUT_FEATURES.md` for detailed documentation of these features.
-
-## Use
-
-### Initial config
-
-Before using, the user must edit `config.py` to write down the correct `CALIBRATION_PATH`. This is the folder that contains (and/or where will be stored) the calibration masters. If using data from different rigs, this variable needs to be changed as it will hold data for one rig (camera/filters/telescope) only.
-
-### Executable scripts
-
-Astro-Pipelines has several executable scripts:
-
-- `astro-pipelines.py`: Main script giving access to all the package functions. See `--help` option for details.
-- `platesolve.py`: Separate wrapper for the Astrometry.Net engine. Use for online platesolving and better control over the platesolving options (although in that last case I would recommend to use `solve-field` directly). See `--help` option for details.
-- `autopipe.py`: Automated pipeline that monitors the observation directory for new FITS files and automatically calibrates and platesolves them.
-
-### Command Line Usage
-
-Astro-Pipelines provides a comprehensive command-line interface for astronomical image processing:
-
-#### Basic Commands
+## Installation
 
 ```bash
-# View help
+./install.sh
+```
+
+The script checks for Python 3.14 and creates a virtual environment in `.venv`. It then installs the dependencies from `requirements.txt` and installs astropipes itself in editable mode. It links the `astropipes` and `astropipes-viewer` commands into `~/bin` (or `~/.local/bin` if `~/bin` doesn't exist), so they can be run from anywhere. Finally, it adds **Astropipes Library** and **Astropipes Viewer** entries to the application launcher, in `~/.local/share/applications`.
+
+To do the same by hand:
+
+```bash
+python3.14 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install --no-deps -e .
+ln -s "$PWD/.venv/bin/astropipes" ~/bin/astropipes                 # optional: run from anywhere
+ln -s "$PWD/.venv/bin/astropipes-viewer" ~/bin/astropipes-viewer
+```
+
+The commands start the venv's Python by its full path, so the links work without activating the venv.
+
+`pip install -e .` creates the `astropipes` and `astropipes-viewer` commands in `.venv/bin` and makes `import astropipes` point at this repository. Code changes take effect without reinstalling. Re-run it only when `pyproject.toml` changes.
+
+## Configuration
+
+Settings are stored in `~/.config/astropipes/config.toml`, or in the file named by the `ASTROPIPES_CONFIG` environment variable. The easiest way to edit them is the Library's **File → Settings** dialog. The file only lists the values that differ from the defaults in `astropipes/config/defaults.py`; the paths are always written. `astropipes --config` prints the settings file location and the main paths.
+
+| Setting | Used for |
+|---|---|
+| `DATA_PATH` | Light frames, organised as `<DATA_PATH>/<Target>/<Filter>/*.fits` |
+| `CALIBRATION_PATH` | Calibration masters (scanned recursively, and written here by `astropipes -M`) |
+| `STACKS_PATH` | Session stacks and region-of-interest views, in `<STACKS_PATH>/<Target>/` |
+| `ARCHIVE_PATH` | Where archived targets are moved |
+| `PROCESSED_PATH` | Work folders for intermediate and output files (see below) |
+| `DATABASE_PATH` | The library database (SQLite) |
+| `OBS_CODE`, `OBS_LON`, `OBS_LAT` | MPC observatory code and site coordinates. The code is used for Find_Orb ephemerides, the NEOCP list and MPC reports. The Settings dialog can look up the coordinates from the code. |
+
+The other tabs of the Settings dialog cover:
+- **General:** time display in UTC or local time, blink period, automatic folder watching.
+- **Alignment:** default and fallback method, memory limits and chunk sizes.
+- **Integration:** sigma clipping and motion-tracking options.
+- **Calibration:** the maximum age of masters, in days.
+
+Settings marked with `*` take effect after a restart.
+
+### Work folders
+
+Everything written under `PROCESSED_PATH` is generated and can be recreated:
+
+| Folder | Contents |
+|---|---|
+| `solved/` | Temporary plate-solving files |
+| `calibrated/` | Calibrated frames (`b_`, `d_`, `f_` prefixes for the bias, dark and flat steps applied) |
+| `aligned/` | Aligned frames |
+| `integrated/` | CLI integrations and the Library's per-filter masters |
+| `stacked/` | Motion-tracked stacks from the viewer |
+| `substacks/` | Motion-tracked substacks |
+| `daily_stacks/` | Daily stacks from the Library |
+| `session_stacks_work/` | Aligned frames used for session stacks |
+| `regions/` | Output of **Latest regions update** |
+
+**Database → Cleanup temp directories** in the Library empties `solved`, `calibrated`, `stacked`, `aligned`, `substacks` and `session_stacks_work`.
+
+## The Library
+
+Open it with `astropipes -G` or the **Astropipes Library** launcher.
+
+### Getting files in
+
+- **Database → Scan for new files** imports new light frames from `DATA_PATH` and calibration masters from `CALIBRATION_PATH`.
+  - Light frames must be in `<Target>/<Filter>/` folders.
+  - The target name comes from the `OBJECT` header, with underscores shown as spaces.
+  - Calibration masters are recognised from their `FRAME` or `IMAGETYP` header, or their file name.
+- When folder watching is enabled in Settings, both folders are watched and new files are scanned automatically.
+- **Database → Refresh database** reloads the view.
+
+The command-line equivalents are `astropipes --scan`, `--scan-calibration` and `--scan-all`.
+
+### Sidebar
+
+| Entry | Shows |
+|---|---|
+| Obs log → Runs | All light frames, grouped into observing runs (frames of the same target less than 30 minutes apart). Runs can be expanded and carry a comment and badges. |
+| Obs log → MPC Log | Observations recorded for MPC reporting |
+| Targets | One entry per target, with its frame count |
+| Dates | Frames per observing date |
+| Stacks | Session stacks of the targets flagged for follow-up |
+| Regions | Regions of interest, with the number of stacks that contain each one |
+| Calibration | Master bias, dark and flat tables |
+
+### Right-click actions
+
+- **A file:** Show in FITS viewer, Calibrate and compare (opens the raw and calibrated frames together in the viewer, to blink between them), Platesolve image, Show header, Delete file.
+- **Several selected files:** Load files in FITS viewer, Platesolve all images, Delete selected files.
+- **A run in the observation log:** Edit comment, Add to MPC log (also adds an MPC badge to the run), Clear Badges.
+- **A target in the sidebar:**
+  - **Load all files in FITS Viewer.**
+  - **Rename target:** renames the target's folders under `DATA_PATH` and `STACKS_PATH`, updates the database (files, regions, follow-up flags) and rewrites the `OBJECT` header of its files.
+  - **Generate masters:** calibrates and aligns all of the target's frames, then integrates one image per filter into `PROCESSED_PATH/integrated/<Target>/`.
+  - **Generate daily stacks:** after you pick a filter, stacks each observing night separately into `PROCESSED_PATH/daily_stacks/<Target>/` and opens the results in the viewer. It needs at least two nights.
+  - **Flag for follow-up (session stacks)… / Remove follow-up flag:** chooses which filters get session stacks.
+  - **Add to MPC log.**
+  - **Move to archive:** moves the light frames to `ARCHIVE_PATH`, keeping their folders, and deletes the target's session stacks. It removes the target from the database and deletes its empty folders.
+- **A date:** Load all files in FITS Viewer.
+- **A region:** Rename region… (moves its PNG views too), Delete region….
+
+### Actions menu
+
+- **Generate session stacks:** for every target flagged for follow-up, stacks each observing night in each flagged filter into `STACKS_PATH/<Target>/stack_<Target>_<Filter>_<YYYYMMDD>.fits`.
+  - All stacks of a target are aligned to the same reference frame, recorded in the `ALIGNREF` header, so they line up across nights and filters.
+  - Existing stacks are skipped.
+  - New stacks are added to the library and plate-solved.
+- **Generate all Region of interest views:** crops every region of interest from every session stack that contains it. The PNGs go to `STACKS_PATH/<Target>/views/<Region>/` and show up in the region's detail view.
+- **Latest regions update:** for the most recent observing session, copies the oldest (`-REF`) and newest (`-NEW`) view of each region into `PROCESSED_PATH/regions/`, for quick comparison.
+
+## The FITS viewer
+
+Open it with `astropipes-viewer [files...]`, the **Astropipes Viewer** launcher (which also opens FITS files from a file manager), or from the Library.
+
+### Toolbar
+
+- **Files:** previous/next file and a slideshow ("blink") button. Also open, close and delete the current file, the loaded-files list, and the FITS header.
+- **Monitor mode:** watches `DATA_PATH` and adds new FITS files as they arrive.
+- **Zoom:** zoom 1:1, zoom to fit, and zoom to a rectangle you draw.
+- **Display:** linear or logarithmic stretch, a brightness slider, and sigma clipping of the display range.
+- **SIMBAD:** search for an object, or find the deep-sky objects in the field.
+- **Sources:** load the Gaia catalog for the field, detect sources, or detect and match Gaia stars in the image.
+- **Solar System Objects:** find known objects in the field (SkyBoT), or **Get orbital elements** (Find_Orb ephemerides for the loaded frames).
+- **Calibrate / Platesolve:** apply to this image or to all loaded images.
+- **Align:** align all loaded images with astroalign or by WCS reprojection.
+- **Integration:** **Stack on ephemeris** (motion-tracked stack).
+- **Regions of interest:** define a new region by drawing a rectangle, or show the regions in the field.
+- **Overlay toolbar:** shows or hides each overlay (ephemeris markers, solar system objects, sources, SIMBAD objects, Gaia stars, matched Gaia stars, regions).
+
+Hovering over the image shows the RA/Dec (on plate-solved images) and the pixel value. Keyboard: `+`/`=` zoom in, `-` zoom out, `0` resets the zoom, `O` opens a file.
+
+### Measuring an asteroid
+
+1. Load the frames of the sequence and plate-solve them.
+2. **Solar System Objects → Get orbital elements**, and enter the object's designation. Find_Orb returns the predicted position at each frame's mid-exposure time. They're shown in an orbit window (Ephemerides and Pseudo MPEC tabs) and as markers on the images.
+3. **Integration → Stack on ephemeris** builds a motion-tracked stack in which the object stays still: a median and an average stack by default, `<name>_median.fits` and `<name>_average.fits`.
+4. With the Gaia catalog loaded (**Sources → Load Gaia catalog**), right-click the object in the stack and choose **Compute object positions**.
+   - After you refine the click position, the object's position in each frame is added to the orbit window.
+   - It includes a least-squares plate constants (LSPC) solution fitted on the Gaia stars.
+5. **Generate Substacks** splits the frames into three consecutive groups and stacks each on the object, marking its expected position.
+6. **Measure object positions** measures the object on the substacks (Measurements tab), and **Generate MPC Report** formats the observations for submission.
+
+## Command line
+
+```bash
 astropipes --help
-
-# Open GUI
-astropipes -G
-
-# View configuration
-astropipes --config
 ```
 
-#### Image Processing
+| Command | What it does |
+|---|---|
+| `-G`, `--gui` | Open the Library |
+| `--config` | Print the settings file location and the main paths |
+| `--scan`, `--scan-calibration`, `--scan-all` | Import new light frames, calibration masters, or both into the library |
+| `-S`, `--solve FILES` | Plate-solve with `solve-field` and write the WCS into the files. Library records are updated. |
+| `-C`, `--calibrate FILES` | Calibrate with the best matching masters from the library, into `PROCESSED_PATH/calibrated/` |
+| `-M`, `--masters {bias,dark,flat} FILES` | Build a calibration master from the given frames, into `CALIBRATION_PATH` |
+| `-A`, `--align FILES` | Align to the first file with the default method, into `PROCESSED_PATH/aligned/` |
+| `-I`, `--integrate FILES` | Stack aligned frames into `PROCESSED_PATH/integrated/`, named `integration_<Filter>.fits` when all frames share a filter. Options: `--integration-method {average,median,sum}`, `--sigma-clip`. |
+| `--get-neocp-objects` | List the objects currently on the NEOCP (via NEOfixer) |
+| `--get-obs NEOCP_DESIGNATION` | Print the observations of a NEOCP object (via NEOfixer), in MPC 80-column format |
+
+Examples:
 
 ```bash
-# Platesolve images
-astropipes -S image1.fits image2.fits
-
-# Calibrate images
-astropipes -C image1.fits image2.fits
-
-# Align images
-astropipes -A image1.fits image2.fits
-
-# Integrate images (NEW!)
-astropipes -I image1.fits image2.fits
+astropipes -M dark darks/*.fits
+astropipes -C L/*.fits
+astropipes -A calibrated/*.fits
+astropipes -I aligned/*.fits --integration-method median --sigma-clip
 ```
 
-#### Image Integration
+`python -m astropipes` is equivalent to `astropipes`.
 
-The new `-I` option allows you to integrate (stack) multiple FITS images using standard stacking methods:
+## Calibration
 
-**Basic Integration:**
+Calibration uses the masters in the library, so scan `CALIBRATION_PATH` after adding masters. For each light frame:
 
-```bash
-# Integrate multiple files
-astropipes -I file1.fits file2.fits file3.fits
+- **Bias and dark:** same binning, gain and offset, and a CCD temperature within ±2 °C. The dark's exposure must be at least the frame's, and it is scaled to the frame's exposure time.
+- **Flat:** same binning and filter, taken on or before the frame's date.
+- **Age limits:** `MAX_BIAS_AGE`, `MAX_DARK_AGE` and `MAX_FLAT_AGE` limit how old a master may be, in days; 0 means no limit.
 
-# Use glob patterns
-astropipes -I *.fits
-astropipes -I L/*.fits
+Matching doesn't use any camera or telescope identifier, so keep one rig's masters per `CALIBRATION_PATH`.
+
+## Known issues
+
+- **Integration → Stack aligned images** in the viewer is not implemented and does nothing.
+- `-G` accepts a FITS file argument (`[FITS_FILE]` in `--help`) but ignores it.
+- The **Downsample factor** and **Search radius** settings are not used. Plate solving always uses a downsample of 2 and, when the image has coordinates, a 15° search radius, which happen to equal the defaults.
+- Alignment with astroalign isn't reproducible: its random sampling isn't seeded, so repeated runs can give slightly different results.
+
+## Development
+
+Setting `ASTROPIPES_DEBUG=1` prints astropipes' debug log messages to stderr; logging is off otherwise. `ASTROPIPES_CONFIG=/path/to/config.toml` selects another settings file, which is useful for testing against a scratch library.
+
+### Code layout
+
+```
+astropipes/
+├── config/        settings: defaults.py + the user TOML file (`from astropipes.config import settings`)
+├── core/          paths and work folders, naming, time display, memory, console/log helpers
+├── fits/          FITS headers, metadata parsing (DATE-OBS, binning), sequence checks, WCS
+├── db/            SQLAlchemy models, engine and migrations, repository (DatabaseManager), library scanner
+├── processing/    calibration, calibration masters, alignment, integration, motion tracking, display stretch
+├── astrometry/    plate solving, catalogs (SIMBAD/Gaia/SkyBoT), source detection, LSPC, orbits, MPC reports
+├── regions/       region-of-interest geometry and PNG views
+├── workflows/     multi-step jobs combining files and the database: stacking, sessions, archive/rename,
+│                  region views, substacks, ephemerides, single-file library operations
+├── cli/           the `astropipes` command
+└── gui/
+    ├── common/    app setup, JobThread, viewer launcher, console/header windows, shared dialogs and result tables
+    ├── library/   the Library window (app.py): widgets/, dialogs/, background threads, folder watcher
+    └── viewer/    the FITS viewer (app.py): image widget, overlays, mixins/, toolbars/, orbit/ windows
+
+share/
+├── applications/  .desktop launchers (paths filled in by install.sh)
+└── icons/         application icon
 ```
 
-**Advanced Options:**
+Layers only import from the layers below them:
 
-```bash
-# Choose integration method
-astropipes -I *.fits --integration-method median
-astropipes -I *.fits --integration-method sum
-
-# Enable sigma clipping
-astropipes -I *.fits --sigma-clip
-
-# Combine options
-astropipes -I *.fits --integration-method median --sigma-clip
+```
+cli, gui  →  workflows  →  processing, astrometry, regions  →  fits, db  →  core, config
 ```
 
-**Features:**
+Two parts of the code use a module at the same level:
+- `db/scan.py` (the library scanner) reads FITS headers through `fits/`.
+- In `processing/`, calibration looks up calibration masters in `db/`, and master generation registers new ones there.
 
-- Automatic sequence consistency checking
-- Multiple integration methods (average, median, sum)
-- Optional sigma clipping for outlier rejection
-- Progress tracking and memory management
-- WCS coordinate system preservation
-- Output saved to organized temporary directories
-
-See `INTEGRATION_USAGE.md` for detailed integration documentation.
-
-### GUI Viewer
-
-Astro-Pipelines includes a PyQt6-based GUI viewer for FITS images (located in `lib/gui_pyqt.py`) with the following features:
-
-- **Interactive Image Display**: Pan, zoom, and navigate through FITS images
-- **WCS Coordinate Display**: Real-time RA/Dec coordinates when hovering over the image
-- **Pixel Value Display**: Shows pixel values and bit depth information
-- **FITS Header Viewer**: Complete FITS header display with formatted table view
-- **Auto Stretch**: Toggle between no stretch and automatic histogram stretching
-- **Image Information**: Display target, filter, exposure, gain, offset, and WCS status
-- **Solar System Object Search**: Search for and display solar system objects in the field using Skybot cone search
-- **Object Markers**: Visual green circles and labels for solar system objects found in the image
-
-#### GUI Usage
-
-```bash
-# Open GUI without loading any file
-python astro-pipelines.py -G
-
-# Open GUI and load a specific FITS file
-python astro-pipelines.py -G path/to/image.fits
-
-# Alternative long form
-python astro-pipelines.py --gui path/to/image.fits
-```
-
-#### GUI Controls
-
-- **Mouse**:
-  - Left-click and drag to pan
-  - Mouse wheel to zoom in/out
-- **Keyboard**:
-  - `+` or `=` to zoom in
-  - `-` to zoom out
-  - `0` to reset zoom
-  - `O` to open a new file
-- **Buttons**:
-  - **Open FITS File**: Browse and load a FITS file
-  - **Auto Stretch**: Toggle automatic histogram stretching
-  - **FITS Header**: View complete FITS header information
-  - **Solar System Objects**: Search for solar system objects in the field (requires WCS)
-  - **Toggle Object Markers**: Show/hide green circles for solar system objects
-  - **Reset Zoom**: Return to 100% zoom level
-
-#### Plate Solving with Progress Dialog
-
-The GUI includes an enhanced plate solving feature with real-time progress monitoring:
-
-**Features:**
-
-- **Progress Dialog**: A dedicated window shows solving progress with real-time console output
-- **Live Output Capture**: See the actual `solve-field` command output as it happens
-- **Cancel Support**: Ability to cancel solving process at any time
-- **Button State Feedback**: Solve button changes to "Solving..." with orange background during processing
-- **Threaded Processing**: Solving runs in background thread to keep GUI responsive
-
-**Usage:**
-
-1. Load a FITS image (with or without WCS information)
-2. Click the "Solve" button
-3. A progress dialog will open showing:
-   - Real-time console output from the solving process
-   - Cancel and Close buttons
-4. The solve button will change to "Solving..." and be disabled
-5. When solving completes, the dialog enables the Close button
-6. If successful, the image is automatically reloaded with the new WCS information
-
-**Solving Modes:**
-
-- **Guided Solving**: Uses existing WCS information for faster, more accurate solving
-- **Blind Solving**: Searches the entire sky when no WCS information is available
-
-**Progress Dialog Features:**
-
-- **Dark Theme**: Console output uses dark background with white text for better readability
-- **Auto-scroll**: Output automatically scrolls to show the latest messages
-- **Process Monitoring**: Shows the exact `solve-field` command being executed
-- **Error Handling**: Displays detailed error messages if solving fails
-- **WCS Validation**: Automatically validates and applies the WCS solution to the original file
-
-#### Solar System Object Search
-
-The GUI includes advanced functionality to search for and display solar system objects in astronomical images:
-
-**Requirements:**
-
-- FITS image with valid WCS (World Coordinate System) information
-- Observation date/time in the FITS header (DATE-OBS, TIME-OBS, etc.)
-- Internet connection for Skybot service access
-
-**Features:**
-
-- **Skybot Cone Search**: Uses the IMCCE Skybot service to find solar system objects in the field
-- **Object Information**: Displays name, type, coordinates, magnitude, distance, and velocity
-- **Visual Markers**: Green circles with object names overlaid on the image
-- **Filtered Results**: Only shows objects actually within the image boundaries
-
-**Usage:**
-
-1. Load a FITS image with WCS information
-2. Click "Solar System Objects" button
-3. The system will search for objects and display results in a dialog
-4. Use "Toggle Object Markers" to show/hide green circles on the image
-
-**Object Information Displayed:**
-
-- **Name**: Object identifier (e.g., asteroid number, comet designation)
-- **Type**: Object classification (asteroid, comet, planet, etc.)
-- **RA/Dec**: Right ascension and declination in degrees
-- **Magnitude**: Apparent brightness
-- **Distance**: Distance from Earth in Astronomical Units (AU)
-- **Velocity**: Apparent motion in arcseconds per hour
-
-#### Motion Tracking Integration
-
-The motion tracking integration feature allows you to stack images while keeping moving objects (like asteroids) static in the final result. This is particularly useful for tracking solar system objects that move across the field of view during observations.
-
-**Features:**
-
-- **Dual Stack Output**: By default, creates both median and average stacks for comparison
-- **Ephemeris-based Tracking**: Uses orbital elements to calculate precise object positions
-- **Border Handling**: Proper padding and cropping to avoid edge artifacts
-- **Configurable**: Control stack types and processing parameters via configuration
-
-**Configuration Options:**
-
-- `MOTION_TRACKING_CREATE_BOTH_STACKS`: Set to `True` to create both median and average stacks, `False` for single stack
-- `MOTION_TRACKING_METHOD`: Default method when creating single stack ('average', 'median', 'sum')
-- `MOTION_TRACKING_SIGMA_CLIP`: Enable/disable sigma clipping (default: False to avoid border issues)
-
-**Usage:**
-
-1. Load a sequence of FITS images in the viewer
-2. Compute orbit data for the target object using "Solar System Objects" menu
-3. Use "Stack on ephemeris" from the integration menu
-4. Both median and average stacks will be created and loaded into the viewer
-
-**Output Files:**
-
-- `{basename}_median.fits`: Median stack (better for noise reduction)
-- `{basename}_average.fits`: Average stack (better for signal preservation)
-
-### AutoPipe Usage
-
-AutoPipe automatically monitors the observation directory (configured via `OBS_PATH` in `config.py`) for new FITS files and processes them through the calibration and platesolving pipeline.
-
-Before using AutoPipe, make sure to set the correct `OBS_PATH` in `config.py`:
-
-```python
-OBS_PATH = '/path/to/your/observations'
-```
-
-Usage examples:
-
-```bash
-# Use default paths from config.py
-python autopipe.py
-
-# With custom observation directory
-python autopipe.py --obs-path /custom/obs/path
-
-# With custom output directory
-python autopipe.py --autopipe-path /custom/output/path
-
-# Process existing files before starting monitoring
-python autopipe.py --process-existing
-```
-
-The default autopipe output directory is `OBS_PATH/autopipe`.
+Nothing outside `gui/` imports Qt. Operations that move, rename or delete library files together with their database records live in `workflows/`. Long-running work is written as a function taking `log(text)` and `should_cancel()` callables. `gui.common.jobs.JobThread` runs these in the background, and the CLI can call them directly.

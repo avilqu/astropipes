@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astropipes"
+version = "0.1.0"
+description = "Astronomical image processing and library management"
+authors = [{ name = "Adrien Vilquin Barrajon", email = "avilqu@gmail.com" }]
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+astropipes = "astropipes.cli:main"
+astropipes-viewer = "astropipes.gui.viewer.app:main"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["astropipes*"]

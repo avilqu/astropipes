@@ -2,3 +2,6 @@ astropipes.db
 .venv/
 __pycache__/
 sample/
+.claude/
+
+*.egg-info/

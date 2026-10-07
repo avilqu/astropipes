@@ -17,7 +17,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$SCRIPT_DIR"
 
 # Required Python version
-REQUIRED_PYTHON_VERSION="3.11"
+REQUIRED_PYTHON_VERSION="3.14"
 
 # Print colored message
 print_message() {
@@ -40,9 +40,9 @@ print_step() {
 check_python() {
     print_step "Checking Python version..."
     
-    if command -v python3.11 &> /dev/null; then
-        PYTHON_CMD="python3.11"
-        PYTHON_VERSION=$(python3.11 --version | cut -d' ' -f2)
+    if command -v python3.14 &> /dev/null; then
+        PYTHON_CMD="python3.14"
+        PYTHON_VERSION=$(python3.14 --version | cut -d' ' -f2)
         print_message "Found Python $PYTHON_VERSION"
     elif command -v python3 &> /dev/null; then
         PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
@@ -51,7 +51,7 @@ check_python() {
             print_message "Found Python $PYTHON_VERSION (using python3)"
         else
             print_error "Python $REQUIRED_PYTHON_VERSION is required, but found Python $PYTHON_VERSION"
-            print_warning "Some dependencies (e.g., astroscrappy) may not be compatible with other versions"
+            print_warning "The pinned versions in requirements.txt may not install on other versions"
             read -p "Continue anyway? (y/N): " -n 1 -r
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -60,7 +60,7 @@ check_python() {
             PYTHON_CMD="python3"
         fi
     else
-        print_error "Python 3 not found. Please install Python 3.11 or later."
+        print_error "Python 3 not found. Please install Python 3.14."
         exit 1
     fi
 }
@@ -145,33 +145,34 @@ install_requirements() {
     fi
 }
 
-# Make scripts executable
-make_scripts_executable() {
-    print_step "Making scripts executable..."
-    
-    SCRIPTS=("astropipes" "astropipes.py" "autopipe.py" "platesolve.py")
-    
-    for script in "${SCRIPTS[@]}"; do
-        SCRIPT_PATH="$PROJECT_DIR/$script"
-        if [ -f "$SCRIPT_PATH" ]; then
-            chmod +x "$SCRIPT_PATH"
-            print_message "Made $script executable"
-        fi
-    done
+# Install astropipes itself (editable) so the astropipes / astropipes-viewer commands exist
+install_package() {
+    print_step "Installing astropipes package..."
+
+    "$PROJECT_DIR/.venv/bin/pip" install --no-deps -e "$PROJECT_DIR"
+    print_message "Installed commands: $PROJECT_DIR/.venv/bin/astropipes, $PROJECT_DIR/.venv/bin/astropipes-viewer"
 }
 
-# Update shebang in astropipes.py
-update_shebang() {
-    print_step "Updating shebang in astropipes.py..."
-    
-    PYTHON_VENV="$PROJECT_DIR/.venv/bin/python"
-    ASTROPIPES_PY="$PROJECT_DIR/astropipes.py"
-    
-    if [ -f "$ASTROPIPES_PY" ]; then
-        # Update the shebang line
-        sed -i "1s|.*|#!$PYTHON_VENV|" "$ASTROPIPES_PY"
-        print_message "Updated shebang in astropipes.py"
+# Link the commands into a user bin directory on PATH (~/bin if it exists, else ~/.local/bin)
+install_command_links() {
+    print_step "Linking commands into your bin directory..."
+
+    if [ -d "$HOME/bin" ]; then
+        BIN_LINK_DIR="$HOME/bin"
+    else
+        BIN_LINK_DIR="$HOME/.local/bin"
+        mkdir -p "$BIN_LINK_DIR"
     fi
+
+    for cmd in astropipes astropipes-viewer; do
+        ln -sf "$PROJECT_DIR/.venv/bin/$cmd" "$BIN_LINK_DIR/$cmd"
+        print_message "Linked $BIN_LINK_DIR/$cmd -> $PROJECT_DIR/.venv/bin/$cmd"
+    done
+
+    case ":$PATH:" in
+        *":$BIN_LINK_DIR:"*) ;;
+        *) print_warning "$BIN_LINK_DIR is not on your PATH; add it to use the astropipes commands from anywhere" ;;
+    esac
 }
 
 # Install desktop files to user applications directory
@@ -185,7 +186,7 @@ install_desktop_files() {
     DESKTOP_FILES=("astropipes-viewer.desktop" "astropipes-library.desktop")
     
     for desktop_file in "${DESKTOP_FILES[@]}"; do
-        DESKTOP_SOURCE="$PROJECT_DIR/$desktop_file"
+        DESKTOP_SOURCE="$PROJECT_DIR/share/applications/$desktop_file"
         DESKTOP_DEST="$USER_APPS_DIR/$desktop_file"
         
         if [ -f "$DESKTOP_SOURCE" ]; then
@@ -194,7 +195,8 @@ install_desktop_files() {
             cp "$DESKTOP_SOURCE" "$TEMP_DESKTOP"
             
             # Update paths in the copied desktop file
-            sed -i "s|/home/tan/dev/astro-pipelines|$PROJECT_DIR|g" "$TEMP_DESKTOP"
+            sed -i -e "s|@BIN_DIR@|$PROJECT_DIR/.venv/bin|g" \
+                -e "s|@ICON@|$PROJECT_DIR/share/icons/astropipes.png|g" "$TEMP_DESKTOP"
             
             # Install to user applications directory
             cp "$TEMP_DESKTOP" "$DESKTOP_DEST"
@@ -232,14 +234,15 @@ print_summary() {
     echo "  source $PROJECT_DIR/.venv/bin/activate"
     echo ""
     echo "To use astropipes, you can:"
-    echo "  1. Activate the venv and run: python astropipes.py --help"
-    echo "  2. Use the wrapper script: ./astropipes --help"
+    echo "  1. Run: astropipes --help  (linked into $BIN_LINK_DIR)"
+    echo "  2. Run it directly: $PROJECT_DIR/.venv/bin/astropipes --help"
     echo "  3. Launch from KDE Plasma app launcher:"
     echo "     - Astropipes Viewer"
     echo "     - Astropipes Library"
     echo ""
     print_warning "Don't forget to:"
-    echo "  - Configure config.py with your paths (CALIBRATION_PATH, DATA_PATH, etc.)"
+    echo "  - Set your paths (CALIBRATION_PATH, DATA_PATH, etc.) in the Library's Settings dialog,"
+    echo "    or in ~/.config/astropipes/config.toml"
     echo "  - Install Astrometry.Net if you want to use platesolving features"
     echo ""
     print_message "Desktop files installed to: $HOME/.local/share/applications"
@@ -262,8 +265,8 @@ main() {
     create_venv
     upgrade_pip
     install_requirements
-    make_scripts_executable
-    update_shebang
+    install_package
+    install_command_links
     install_desktop_files
     print_summary
 }
