@@ -55,6 +55,12 @@ SETTINGS_TABS = {
         Setting('DATA_FOLDER_WATCH_DEBOUNCE_MS', 'Watch debounce', 'int', restart=True,
                 minimum=100, maximum=60000, step=100, suffix=' ms',
                 tooltip='Wait this long after the last file change before scanning.'),
+        Setting('REGION_DIFF_ENABLED', 'Region difference images', 'bool',
+                tooltip='Write a NEW − REF difference image (-DIFF.png / .fits) with each '
+                        'exported REF / NEW pair of region views.'),
+        Setting('REGION_DIFF_STRETCH_SIGMA', 'Difference stretch', 'float', minimum=1, maximum=50,
+                step=0.5, decimals=1, suffix=' σ',
+                tooltip='Difference PNG: this many times the noise is pure white (or black).'),
     ],
     'Paths': [
         Setting('DATA_PATH', 'Data', 'dir', tooltip='Root folder of raw light frames.'),

@@ -9,10 +9,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
+from astropy.io import fits
+
+from astropipes.config import settings
 from astropipes.core import paths
 from astropipes.db import get_db_manager
+from astropipes.processing.difference import difference_region, write_difference_fits
 from astropipes.regions.geometry import SkyRegion, crop_region_from_fits, region_in_image_field
-from astropipes.regions.views import png_filename_for_stack, region_view_stretch_limits, render_region_png
+from astropipes.regions.views import (
+    png_filename_for_stack,
+    region_view_stretch_limits,
+    render_difference_png,
+    render_region_png,
+)
 from astropipes.workflows.sessions import group_files_by_session, norm_path
 
 
@@ -162,7 +171,9 @@ def update_region_views_for_new_stacks(target, new_stack_paths, dest_dir: Path, 
             continue
         views.sort(key=_view_sort_key)
         new_views.sort(key=_view_sort_key)
-        copied, errs = export_region_pair(region, views[0], new_views[-1], dest_dir, log, overwrite=True)
+        new_view = new_views[-1]
+        ref_view = _reference_view(views, new_view)
+        copied, errs = export_region_pair(region, ref_view, new_view, dest_dir, log, overwrite=True)
         results["exported"] += copied
         results["errors"].extend(errs)
 
@@ -176,6 +187,24 @@ def _view_sort_key(view) -> datetime:
         return datetime.fromtimestamp(os.path.getmtime(view.png_path))
     except OSError:
         return datetime.min
+
+
+def _stack_filter(stack_fits_path) -> str:
+    """Filter of a session stack from its FITS header (the library row only says it is a stack)."""
+    try:
+        return str(fits.getheader(stack_fits_path, ext=0).get("FILTER") or "").strip()
+    except Exception:
+        return ""
+
+
+def _reference_view(views, new_view):
+    """Oldest of the date-sorted views in the same filter as new_view (oldest of all if none)."""
+    new_filter = _stack_filter(new_view.stack_fits_path)
+    if new_filter:
+        for v in views:
+            if _stack_filter(v.stack_fits_path) == new_filter:
+                return v
+    return views[0]
 
 
 def _region_export_filename(region_name: str, role: str) -> str:
@@ -200,14 +229,17 @@ def _unique_dest_path(dest_dir: Path, basename: str) -> Path:
         n += 1
 
 
-def export_region_pair(region, ref_view, new_view, dest_dir: Path, log, *, overwrite=False):
+def export_region_pair(region, ref_view, new_view, dest_dir: Path, log, *, overwrite=False, diff_fits=True):
     """
-    Copy a region's REF and NEW view PNGs into dest_dir as <Region>-REF.png / <Region>-NEW.png.
+    Copy a region's REF and NEW view PNGs into dest_dir as <Region>-REF.png / <Region>-NEW.png,
+    then write the difference image <Region>-DIFF.png, and <Region>-DIFF.fits when diff_fits
+    (see write_region_difference).
     Without overwrite, existing files are kept and the copies get a _2, _3… suffix.
     Returns (number copied, [(region name, error)]).
     """
     copied = 0
     errors = []
+    new_dest = None
     for role, view in (("REF", ref_view), ("NEW", new_view)):
         basename = _region_export_filename(region.name, role)
         dest = dest_dir / basename if overwrite else _unique_dest_path(dest_dir, basename)
@@ -215,10 +247,61 @@ def export_region_pair(region, ref_view, new_view, dest_dir: Path, log, *, overw
             shutil.copy2(Path(view.png_path), dest)
             copied += 1
             log(f"    → {dest.name}\n")
+            if role == "NEW":
+                new_dest = dest
         except OSError as e:
             errors.append((region.name, str(e)))
             log(f"    ✗ {role}: {e}\n")
+    if new_dest is not None and settings.REGION_DIFF_ENABLED:
+        # Same suffix as the NEW copy, so the three files of a pair sort together
+        stem = new_dest.stem
+        i = stem.rfind("-NEW")
+        write_region_difference(
+            region, ref_view, new_view, dest_dir / f"{stem[:i]}-DIFF{stem[i + 4:]}", log,
+            write_fits=diff_fits,
+        )
     return copied, errors
+
+
+def write_region_difference(region, ref_view, new_view, dest_stem: Path, log, *, write_fits=True) -> bool:
+    """
+    Difference image NEW − REF of a region, from the session stacks behind the two views, as
+    dest_stem.png (stretched to ±REGION_DIFF_STRETCH_SIGMA times the noise) and, with write_fits,
+    dest_stem.fits.
+    Problems are logged, not raised: the REF / NEW pair stays usable without a difference.
+    """
+    if norm_path(ref_view.stack_fits_path) == norm_path(new_view.stack_fits_path):
+        return False
+    ref_filter = _stack_filter(ref_view.stack_fits_path)
+    new_filter = _stack_filter(new_view.stack_fits_path)
+    if ref_filter != new_filter:
+        log(f"    ! No difference image: REF is {ref_filter or '?'}, NEW is {new_filter or '?'}\n")
+        return False
+    sky = SkyRegion(
+        ra_min=region.ra_min,
+        ra_max=region.ra_max,
+        dec_min=region.dec_min,
+        dec_max=region.dec_max,
+    )
+    result = difference_region(ref_view.stack_fits_path, new_view.stack_fits_path, sky)
+    if not result["success"]:
+        log(f"    ! No difference image: {result['error']}\n")
+        return False
+    png_path = dest_stem.with_name(dest_stem.name + ".png")
+    fits_path = dest_stem.with_name(dest_stem.name + ".fits")
+    try:
+        render_difference_png(result["diff"], result["noise"], str(png_path), settings.REGION_DIFF_STRETCH_SIGMA)
+        if write_fits:
+            write_difference_fits(result, str(fits_path), ref_view.stack_fits_path, new_view.stack_fits_path, ref_filter)
+    except Exception as e:
+        log(f"    ✗ DIFF: {e}\n")
+        return False
+    flags = ", ".join(result["flags"])
+    log(
+        f"    → {png_path.name} (FWHM {result['fwhm_ref']:.1f} / {result['fwhm_new']:.1f} px, "
+        f"scale {result['flux_scale']:.2f}{', ' + flags if flags else ''})\n"
+    )
+    return True
 
 
 def _stack_in_session_window(stack, session_start: datetime, session_end: datetime) -> bool:
@@ -314,14 +397,14 @@ def run_latest_regions_update(log=None, should_cancel=None) -> dict:
 
         all_views.sort(key=_view_sort_key)
         session_views.sort(key=_view_sort_key)
-        ref_view = all_views[0]
         new_view = session_views[-1]
+        ref_view = _reference_view(all_views, new_view)
 
         log(
             f"  {region.name} ({region.target}): "
             f"{len(session_views)} session view(s), {len(all_views)} total — copying REF + NEW\n"
         )
-        n, errs = export_region_pair(region, ref_view, new_view, dest_dir, log)
+        n, errs = export_region_pair(region, ref_view, new_view, dest_dir, log, diff_fits=False)
         copied += n
         errors.extend(errs)
 

@@ -71,7 +71,7 @@ Everything written under `PROCESSED_PATH` is generated and can be recreated:
 | `substacks/` | Motion-tracked substacks |
 | `daily_stacks/` | Daily stacks from the Library |
 | `session_stacks_work/` | Aligned frames used for session stacks |
-| `regions/` | Output of **Latest regions update**, and one `<YYYY-MM-DD>/` folder per night from automatic processing |
+| `regions/` | REF / NEW / DIFF images of each region: output of **Latest regions update**, and one `<YYYY-MM-DD>/` folder per night from automatic processing |
 
 **Database → Cleanup temp directories** in the Library empties `solved`, `calibrated`, `stacked`, `aligned`, `substacks` and `session_stacks_work`.
 
@@ -125,7 +125,7 @@ The command-line equivalents are `astropipes --scan`, `--scan-calibration` and `
   - Existing stacks are skipped.
   - New stacks are added to the library and plate-solved.
 - **Generate all Region of interest views:** crops every region of interest from every session stack that contains it. The PNGs go to `STACKS_PATH/<Target>/views/<Region>/` and show up in the region's detail view.
-- **Latest regions update:** for the most recent observing session, copies the oldest (`-REF`) and newest (`-NEW`) view of each region into `PROCESSED_PATH/regions/`, for quick comparison.
+- **Latest regions update:** for the most recent observing session, copies the oldest (`-REF`) and newest (`-NEW`) view of each region into `PROCESSED_PATH/regions/`, for quick comparison, along with their difference image (`-DIFF`, see [Difference images](#difference-images)).
 
 ## The FITS viewer
 
@@ -201,7 +201,7 @@ astropipes -I aligned/*.fits --integration-method median --sigma-clip
   - one stack per flagged filter in the run, aligned like the session stacks (`ALIGNREF`), into `STACKS_PATH/<Target>/stack_<Target>_<Filter>_<YYYYMMDD>.fits`. Later runs of the same night get `_2`, `_3`…;
   - the stacks are added to the library and plate-solved;
   - the target's region views are generated;
-  - the oldest (`-REF`) and newest (`-NEW`) view of each region in the new stacks are copied into `PROCESSED_PATH/regions/<YYYY-MM-DD>/`, replacing the previous copies of that night.
+  - the oldest (`-REF`) and newest (`-NEW`) view of each region in the new stacks are copied into `PROCESSED_PATH/regions/<YYYY-MM-DD>/` with their difference image (`-DIFF`), replacing the previous copies of that night.
 - Processed runs are recorded in `PROCESSED_PATH/autoprocess_state.json`. At startup, the watcher processes the runs it missed, as long as they were written in the last `AUTOPROCESS_RECOVERY_HOURS` (36 h). The first time it starts, everything already in the library counts as processed.
 - Only one watcher runs at a time (lock file `PROCESSED_PATH/autoprocess.lock`).
 
@@ -216,6 +216,16 @@ journalctl --user -u astropipes-watch -f         # follow its log
 ```
 
 To use a settings file other than the default, uncomment the `ASTROPIPES_CONFIG` line with `systemctl --user edit --full astropipes-watch`.
+
+## Difference images
+
+Each REF / NEW pair of a region comes with a difference image, to help spot supernovae and other new sources: `<Region>-DIFF.png` next to `-REF.png` and `-NEW.png`, plus `<Region>-DIFF.fits` in automatic processing (not in **Latest regions update**).
+
+- It is computed from the two session stacks behind the views, not from the PNGs. NEW is reprojected onto REF's pixels, the sharper of the two is blurred to the other's seeing with a kernel fitted on the field stars, NEW is scaled to REF's brightness, and REF is subtracted. The sky level and gradients (moonlight) are removed.
+- REF is the oldest view in the same filter as NEW. If there is none, or the region has fewer than 3 usable stars, there is no difference image and the log says why.
+- In the PNG, the background is mid-grey, a new or brightened source is a white dot, and a fainter or vanished one is black. The stretch is set by the noise: `REGION_DIFF_STRETCH_SIGMA` (5) times the noise is pure white, so a given signal looks the same every night. Saturated stars and galaxy cores often leave residuals.
+- The FITS file keeps the unstretched difference, in REF's units with its WCS, to open in the viewer. Its header has `FWHMREF` / `FWHMNEW` (seeing, px), `KERNEL`, `FLXSCALE` (factor applied to NEW), `DIFFRMS` (noise) and `DIFFFLAG`: `SEEING` when one image's FWHM is more than twice the other's, `TRANSP` when their brightness differs by more than 2.5×, `FEWSTARS` when fewer than 6 stars were used. A flagged difference is shallower or less clean.
+- `REGION_DIFF_ENABLED = false` turns difference images off.
 
 ## Calibration
 

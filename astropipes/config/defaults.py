@@ -76,6 +76,11 @@ BLINK_PERIOD_MS = 1000
 DATA_FOLDER_WATCH_ENABLED = True
 DATA_FOLDER_WATCH_DEBOUNCE_MS = 1500
 
+# Region of interest exports: also write a NEW − REF difference image (<Region>-DIFF.png / .fits)
+# next to each REF / NEW pair. The PNG maps -N sigma of the difference noise to black and +N to white.
+REGION_DIFF_ENABLED = True
+REGION_DIFF_STRETCH_SIGMA = 5.0
+
 # Automatic processing (astropipes --watch): poll DATA_PATH, and stack each finished run of a
 # follow-up target. A run ends when a frame of another target arrives, or after the idle time.
 AUTOPROCESS_POLL_SECONDS = 30

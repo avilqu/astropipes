@@ -96,6 +96,19 @@ def render_region_png(
     iio.imwrite(output_path, uint8)
 
 
+def render_difference_png(diff: np.ndarray, noise: float, output_path: str, n_sigma: float = 5.0) -> None:
+    """
+    Difference image PNG with a stretch centred on zero and scaled to the noise: -n_sigma is
+    black, 0 mid-grey, +n_sigma white, so a source of given S/N looks the same every night.
+    Pixels without data (no overlap between REF and NEW) are mid-grey.
+    """
+    limit = max(float(n_sigma) * float(noise), 1e-12)
+    data = np.nan_to_num(diff.astype(np.float64), nan=0.0)
+    uint8 = apply_stretch_to_uint8(data, -limit, limit)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    iio.imwrite(output_path, uint8)
+
+
 def region_view_stretch_limits(crops: list) -> list:
     """Shared two-point stretch limits for a set of region crops (see two_point_stretch_limits)."""
     return two_point_stretch_limits(
